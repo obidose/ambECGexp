@@ -1,7 +1,7 @@
 'use strict';
 const els = {
   file:document.getElementById('file'), leads:document.getElementById('leads'), fs:document.getElementById('fs'), uv:document.getElementById('uv'),
-  win:document.getElementById('win'), vfill:document.getElementById('vfill'), vfillVal:document.getElementById('vfillVal'), autoGain:document.getElementById('autoGain'), gainMode:document.getElementById('gainMode'),
+  win:document.getElementById('win'), vfill:document.getElementById('vfill'), vfillVal:document.getElementById('vfillVal'), autoGain:document.getElementById('autoGain'),
   showHR:document.getElementById('showHR'), hrLock:document.getElementById('hrLock'), hrSmooth:document.getElementById('hrSmooth'), robustHR:document.getElementById('robustHR'), hrTol:document.getElementById('hrTol'),
   baseline:document.getElementById('baseline'), toolPan:document.getElementById('toolPan'), toolTime:document.getElementById('toolTime'), toolVolt:document.getElementById('toolVolt'),
   showScale:document.getElementById('showScale'), showL0:document.getElementById('showL0'), showL1:document.getElementById('showL1'), showL2:document.getElementById('showL2'),
@@ -10,7 +10,7 @@ const els = {
 };
 const state = {
   fs:200, uvPerLSB:2, leadCount:3, winSecs:10, vfill:0.65,
-  autoGain:true, gainMode:'global',
+  autoGain:true,
   showHR:true, hrLockScale:true, hrSmooth:5, robustHR:true, hrTol:30,
   baselineMode:'hp', showScaleBar:true, showLeads:[true,true,true],
   raw:null, csv:null, totalSamples:0, viewStart:0,
@@ -60,7 +60,12 @@ function windowSeries(leadIndex){
     } else { const s=start+Math.floor((x+0.5)*nSamp/denom); seg[x]=sampleMV(leadIndex,s); }
   }
   const dtpx=state.winSecs/Math.max(1,W);
-  if(state.baselineMode==='hp') return highpassIIR(seg, dtpx, 0.5, sampleMV(leadIndex, start-1));
+  if(state.baselineMode==='hp'){
+    const hp=highpassIIR(seg, dtpx, 0.5, sampleMV(leadIndex, start-1));
+    const off=seg[0]-hp[0];
+    for(let i=0;i<hp.length;i++) hp[i]+=off;
+    return hp;
+  }
   const tmp=Array.from(seg).sort((a,b)=>a-b); const med=tmp.length%2? tmp[(tmp.length-1)>>1] : 0.5*(tmp[tmp.length/2-1]+tmp[tmp.length/2]); for(let i=0;i<seg.length;i++) seg[i]-=med; return seg;
 }
 function windowRawSegMulti(leads){
@@ -74,7 +79,10 @@ function windowRawSegMulti(leads){
         const vals=new Array(L); for(let j=0;j<L;j++) vals[j]=sampleMV(leads[j], start-1); vals.sort((x,y)=>x-y); const mid=L>>1; prev=L%2?vals[mid]:0.5*(vals[mid-1]+vals[mid]);
       }
     } else prev=a[0];
-    return highpassIIR(a, 1/Math.max(1,fs), 0.5, prev);
+    const hp=highpassIIR(a, 1/Math.max(1,fs), 0.5, prev);
+    const off=a[0]-hp[0];
+    for(let i=0;i<hp.length;i++) hp[i]+=off;
+    return hp;
   }
   const tmp=Array.from(a).sort((u,v)=>u-v); const med=tmp.length%2? tmp[(tmp.length-1)>>1] : 0.5*(tmp[tmp.length/2-1]+tmp[tmp.length/2]); for(let i=0;i<a.length;i++) a[i]-=med; return a;
 }
@@ -97,11 +105,11 @@ function getVisibleLeads(){ const v=[]; for(let i=0;i<Math.min(3,state.leadCount
 function getOverviewRange(){ const pts=state.overview.pts||[]; let minB=Infinity,maxB=-Infinity; for(const p of pts){ if(!isFinite(p?.bpm)) continue; if(p.bpm<minB) minB=p.bpm; if(p.bpm>maxB) maxB=p.bpm; } if(!isFinite(minB)||!isFinite(maxB)){ minB=60; maxB=180; } const pad=10; minB=Math.max(30,Math.floor((minB-pad)/10)*10); maxB=Math.min(230,Math.ceil((maxB+pad)/10)*10); if(maxB-minB<40){ const mid=(maxB+minB)/2; minB=Math.max(30,mid-30); maxB=Math.min(230,mid+30); } return {minB,maxB}; }
 function getHRScale(windowRes){ if(state.hrLockScale && state.overview && state.overview.range) return state.overview.range; let minB=60,maxB=180; if(windowRes&&windowRes.pts&&windowRes.pts.length){ minB=Math.min(...windowRes.pts.map(p=>p.bpm)); maxB=Math.max(...windowRes.pts.map(p=>p.bpm)); const pad=10; minB=Math.max(30,Math.floor((minB-pad)/10)*10); maxB=Math.min(230,Math.ceil((maxB+pad)/10)*10); if(maxB-minB<40){ const mid=(maxB+minB)/2; minB=Math.max(30,mid-30); maxB=Math.min(230,mid+30); } } return {minB,maxB}; }
 
-function drawPaperGrid(ctx,y0,h,laneH,pxPerSec){
+function drawPaperGrid(ctx,y0,h,laneH,pxPerSec,gainPx){
   const t0=state.viewStart/state.fs; const t1=t0+state.winSecs; const smallT=0.04;
   const cs=getComputedStyle(document.body);
   for(let t=Math.floor(t0/smallT)*smallT;t<=t1+1e-9;t+=smallT){ const x=(t-t0)*pxPerSec; const big=(Math.round(t/smallT)%5===0); ctx.strokeStyle=big? (cs.getPropertyValue('--grid-strong')||'#999') : (cs.getPropertyValue('--grid-weak')||'#999'); ctx.lineWidth=big?1:0.5; ctx.beginPath(); ctx.moveTo(x,y0); ctx.lineTo(x,y0+h); ctx.stroke(); }
-  const gridPxPerMV=(laneH*state.vfill)/6; const step=gridPxPerMV*0.1;
+  const gridPxPerMV=gainPx; const step=gridPxPerMV*0.1;
   for(let y=y0,k=0;y<=y0+h+1;y+=step,k++){ const big=(k%5===0); ctx.strokeStyle=big? (cs.getPropertyValue('--grid-strong')||'#999') : (cs.getPropertyValue('--grid-weak')||'#999'); ctx.lineWidth=big?1:0.5; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(state.width,y); ctx.stroke(); }
 }
 
@@ -111,19 +119,34 @@ function draw(){
   const cs=getComputedStyle(document.body);
   ctx.clearRect(0,0,W,H); ctx.fillStyle=cs.getPropertyValue('--bg')||'#0b1021'; ctx.fillRect(0,0,W,H);
   if(!hasData()){ ctx.fillStyle='#94a3b8'; ctx.fillText('Open sample or load an ECG…',12,18); return; }
-  const hrPane=state.showHR?Math.round(H*0.18):0; const mainH=H-hrPane; const vis=getVisibleLeads(); const shown=vis.length; const laneH=mainH/Math.max(1,shown); const pxPerSec=W/Math.max(0.2,state.winSecs);
-  drawPaperGrid(ctx,0,mainH,laneH,pxPerSec);
+  const hrPane=state.showHR?Math.round(H*0.18):0; const mainH=H-hrPane; const vis=getVisibleLeads(); const shown=vis.length;
+  const pxPerSec=W/Math.max(0.2,state.winSecs); const rows=pxPerSec<40?2:1;
+  const laneH=mainH/Math.max(1,shown*rows);
   const segs=[],amps=[];
   for(let k=0;k<shown;k++){ const li=vis[k]; const seg=windowSeries(li); segs.push(seg); const abs=seg.map(Math.abs).sort((a,b)=>a-b); const p95=abs[Math.max(0,Math.floor(0.95*(abs.length-1)))]; amps.push(p95||0.5); }
-  const gains=new Array(shown);
-  if(state.autoGain){ if(state.gainMode==='global'){ const a=Math.max(...amps); const target=Math.max(0.2,a*1.2); const g=(laneH*state.vfill)/(2*target); for(let i=0;i<shown;i++) gains[i]=g; } else { for(let i=0;i<shown;i++){ const target=Math.max(0.2,amps[i]*1.2); gains[i]=(laneH*state.vfill)/(2*target); } } } else { const g=(laneH*state.vfill)/6; for(let i=0;i<shown;i++) gains[i]=g; }
+  let gainPx;
+  if(state.autoGain){ const a=Math.max(...amps); const target=Math.max(0.2,a*1.2); gainPx=(laneH*state.vfill)/(2*target); }
+  else { gainPx=(laneH*state.vfill)/6; }
+  const gains=new Array(shown).fill(gainPx);
   const comp=clamp((pxPerSec/120),0.3,1); const gainsPlot=gains.map(g=>g*comp);
+  drawPaperGrid(ctx,0,mainH,laneH,pxPerSec,gainPx);
   const leadNames=['V1','V3','V5'];
-  for(let k=0;k<shown;k++){ const baseY=(k+0.5)*laneH; const seg=segs[k]; const gain=gainsPlot[k]; ctx.strokeStyle=cs.getPropertyValue('--trace')||'#a5b4fc'; ctx.lineWidth=1.2; ctx.beginPath(); for(let x=0;x<W;x++){ const y=baseY - seg[x]*gain; if(x===0) ctx.moveTo(0,y); else ctx.lineTo(x,y); } ctx.stroke();
-    const gridGain=(laneH*state.vfill)/6; const x0=20,x1=x0+0.2*pxPerSec; const y0=baseY,y1=y0-1.0*gridGain; ctx.strokeStyle=cs.getPropertyValue('--ink')||'#e5e7eb'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(x0,y0); ctx.lineTo(x0,y1); ctx.lineTo(x1,y1); ctx.lineTo(x1,y0); ctx.stroke(); ctx.fillStyle=cs.getPropertyValue('--muted')||'#94a3b8'; ctx.font='12px system-ui,sans-serif'; ctx.fillText(leadNames[vis[k]]||('Lead '+(vis[k]+1)), 10, baseY - laneH*0.35); }
+  for(let r=0;r<rows;r++){
+    for(let k=0;k<shown;k++){
+      const baseY=(r*shown + k + 0.5)*laneH;
+      const seg=segs[k]; const gain=gainsPlot[k];
+      ctx.strokeStyle=cs.getPropertyValue('--trace')||'#a5b4fc'; ctx.lineWidth=1.2; ctx.beginPath();
+      for(let x=0;x<W;x++){ const y=baseY - seg[x]*gain; if(x===0) ctx.moveTo(0,y); else ctx.lineTo(x,y); }
+      ctx.stroke();
+      const x0=20,x1=x0+0.2*pxPerSec; const y0=baseY,y1=y0-1.0*gainPx;
+      ctx.strokeStyle=cs.getPropertyValue('--ink')||'#e5e7eb'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(x0,y0); ctx.lineTo(x0,y1); ctx.lineTo(x1,y1); ctx.lineTo(x1,y0); ctx.stroke();
+      ctx.fillStyle=cs.getPropertyValue('--muted')||'#94a3b8'; ctx.font='12px system-ui,sans-serif';
+      ctx.fillText(leadNames[vis[k]]||('Lead '+(vis[k]+1)), 10, y0 - laneH*0.35);
+    }
+  }
   if(state.showScaleBar){ const barLen=pxPerSec; const barX=Math.max(8,W-barLen-12); const barY=Math.max(20,mainH-16); ctx.strokeStyle=cs.getPropertyValue('--ink')||'#e5e7eb'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(barX,barY); ctx.lineTo(barX+barLen,barY); ctx.stroke(); for(let k=0;k<=5;k++){ const x=barX+k*(barLen/5), len=(k%5===0)?10:6; ctx.beginPath(); ctx.moveTo(x,barY); ctx.lineTo(x,barY+len); ctx.stroke(); } ctx.fillStyle=cs.getPropertyValue('--muted')||'#94a3b8'; ctx.fillText('1 s', barX+barLen/2-10, barY-4); }
   if(state.caliper && state.caliper.a!=null && state.caliper.b!=null){ const t0=state.viewStart/state.fs; const a=Math.min(state.caliper.a,state.caliper.b), b=Math.max(state.caliper.a,state.caliper.b); const xA=(a-t0)*pxPerSec, xB=(b-t0)*pxPerSec; const dt=b-a; const bpm=dt>0?60/dt:NaN; ctx.strokeStyle='#22d3ee'; ctx.setLineDash([4,3]); ctx.beginPath(); ctx.moveTo(xA,0); ctx.lineTo(xA,mainH); ctx.stroke(); ctx.beginPath(); ctx.moveTo(xB,0); ctx.lineTo(xB,mainH); ctx.stroke(); ctx.setLineDash([]); const text=`Δt ${(dt*1000).toFixed(0)} ms • ≈${isFinite(bpm)?bpm.toFixed(1):'—'} bpm`; ctx.font='12px system-ui,sans-serif'; const pad=6; const tw=ctx.measureText(text).width+pad*2; const bx=Math.min(W-tw-8, Math.max(8,(xA+xB)/2 - tw/2)); const by=8; ctx.fillStyle=cs.getPropertyValue('--overlay-fill'); ctx.strokeStyle=cs.getPropertyValue('--overlay-stroke'); ctx.lineWidth=1; ctx.fillRect(bx,by,tw,18); ctx.strokeRect(bx,by,tw,18); ctx.fillStyle=cs.getPropertyValue('--overlay-text'); ctx.fillText(text, bx+pad, by+13); }
-  if(state.caliperV && state.caliperV.yA!=null && state.caliperV.yB!=null){ const li=Math.max(0, Math.min(shown-1, state.caliperV.lead|0)); const baseY=(li+0.5)*laneH; const gain=gainsPlot[li]||1; const yA=state.caliperV.yA,yB=state.caliperV.yB; const dv=(yA-yB)/gain; const vtxt=`ΔV ${dv.toFixed(2)} mV (${leadNames[vis[li]]||('Lead '+(vis[li]+1))})`; const pad=6; const vw=ctx.measureText(vtxt).width+pad*2; const vx=12; const vy=Math.max(16, baseY - laneH*0.35); ctx.strokeStyle='#22d3ee'; ctx.setLineDash([4,3]); ctx.beginPath(); ctx.moveTo(0,yA); ctx.lineTo(W,yA); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0,yB); ctx.lineTo(W,yB); ctx.stroke(); ctx.setLineDash([]); ctx.fillStyle=cs.getPropertyValue('--overlay-fill'); ctx.strokeStyle=cs.getPropertyValue('--overlay-stroke'); ctx.lineWidth=1; ctx.fillRect(vx,vy,vw,18); ctx.strokeRect(vx,vy,vw,18); ctx.fillStyle=cs.getPropertyValue('--overlay-text'); ctx.fillText(vtxt, vx+pad, vy+13); }
+  if(state.caliperV && state.caliperV.yA!=null && state.caliperV.yB!=null){ const li=Math.max(0, Math.min(shown-1, state.caliperV.lead|0)); const idx=Math.floor(state.caliperV.yA/Math.max(1,laneH)); const row=Math.floor(idx/shown); const baseY=(row*shown + li + 0.5)*laneH; const gain=gainsPlot[li]||1; const yA=state.caliperV.yA,yB=state.caliperV.yB; const dv=(yA-yB)/gain; const vtxt=`ΔV ${dv.toFixed(2)} mV (${leadNames[vis[li]]||('Lead '+(vis[li]+1))})`; const pad=6; const vw=ctx.measureText(vtxt).width+pad*2; const vx=12; const vy=Math.max(16, baseY - laneH*0.35); ctx.strokeStyle='#22d3ee'; ctx.setLineDash([4,3]); ctx.beginPath(); ctx.moveTo(0,yA); ctx.lineTo(W,yA); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0,yB); ctx.lineTo(W,yB); ctx.stroke(); ctx.setLineDash([]); ctx.fillStyle=cs.getPropertyValue('--overlay-fill'); ctx.strokeStyle=cs.getPropertyValue('--overlay-stroke'); ctx.lineWidth=1; ctx.fillRect(vx,vy,vw,18); ctx.strokeRect(vx,vy,vw,18); ctx.fillStyle=cs.getPropertyValue('--overlay-text'); ctx.fillText(vtxt, vx+pad, vy+13); }
   const hrPane2 = state.showHR?Math.round(H*0.18):0; if(hrPane2>0){ const paneY=mainH; const h=hrPane2; const leads=getVisibleLeads(); const segHR=windowRawSegMulti(leads); const dt=1/Math.max(1,state.fs); const res=detectHR(segHR, dt, state.hrSmooth, state.robustHR, state.hrTol); let {minB,maxB}=getHRScale(res); ctx.fillStyle=cs.getPropertyValue('--bg'); ctx.fillRect(0,paneY,W,h); for(let b=Math.ceil(minB/20)*20; b<=maxB; b+=20){ const y=paneY+h - (b-minB)/(maxB-minB)*h; ctx.strokeStyle=cs.getPropertyValue('--grid-weak'); ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); ctx.fillStyle=cs.getPropertyValue('--muted'); ctx.font='11px system-ui,sans-serif'; ctx.fillText(String(b)+' bpm', 6, y-2); } if(res.pts.length){ const firstY=paneY+h - (res.pts[0].bpm-minB)/(maxB-minB)*h; const lastY=paneY+h - (res.pts[res.pts.length-1].bpm-minB)/(maxB-minB)*h; ctx.strokeStyle=cs.getPropertyValue('--hr')||'#34d399'; ctx.lineWidth=1.8; ctx.beginPath(); ctx.moveTo(0,firstY); for(let i=0;i<res.pts.length;i++){ const x=(res.pts[i].t/state.winSecs)*W; const y=paneY+h - (res.pts[i].bpm-minB)/(maxB-minB)*h; ctx.lineTo(x,y); } ctx.lineTo(W,lastY); ctx.stroke(); const avg=res.avg; ctx.fillStyle=cs.getPropertyValue('--muted'); ctx.font='12px system-ui,sans-serif'; ctx.fillText('HR '+(isFinite(avg)?avg.toFixed(0)+' bpm':'—'), W-90, paneY+14); } }
 }
 function drawOverview(){ const ctx=els.overview.getContext('2d'); const dpr=state.dpr; ctx.setTransform(dpr,0,0,dpr,0,0); const W=els.overview.clientWidth||600,H=els.overview.clientHeight||80; const cs=getComputedStyle(document.body); ctx.clearRect(0,0,W,H); ctx.fillStyle=cs.getPropertyValue('--bg'); ctx.fillRect(0,0,W,H); if(!hasData()){ ctx.fillStyle=cs.getPropertyValue('--muted'); ctx.fillText('Load a file to build HR overview…',12,16); return; } const totalSec=state.totalSamples/state.fs; const T0=Math.max(0,state.overview.ovStartSec||0); const Tspan=Math.max(1e-6,state.overview.ovSpanSec||totalSec); const Tend=Math.min(totalSec,T0+Tspan); const pts=state.overview.pts||[]; if(!pts.length){ ctx.fillStyle=cs.getPropertyValue('--muted'); const msg=state.overview.building?('Building HR overview… '+Math.round((state.overview.progress||0)*100)+'%'):'HR overview not built'; ctx.fillText(msg,12,16); } else { const range=state.overview.range||getOverviewRange(); const minB=range.minB,maxB=range.maxB; for(let b=Math.ceil(minB/20)*20; b<=maxB; b+=20){ const y=H - (b-minB)/(maxB-minB)*H; ctx.strokeStyle=cs.getPropertyValue('--grid-weak'); ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); ctx.fillStyle=cs.getPropertyValue('--muted'); ctx.font='10px system-ui,sans-serif'; ctx.fillText(b+' bpm',4,y-2); } ctx.strokeStyle=cs.getPropertyValue('--hr-ov')||'#93c5fd'; ctx.lineWidth=1.5; ctx.beginPath(); let moved=false; for(const p of pts){ const t=p.t; if(t<T0||t>Tend||!isFinite(p?.bpm)) continue; const x=((t-T0)/Tspan)*W; const y=H - (p.bpm-minB)/(maxB-minB)*H; if(!moved){ ctx.moveTo(x,y); moved=true; } else ctx.lineTo(x,y); } if(moved) ctx.stroke(); } const t0=state.viewStart/state.fs, t1=t0+state.winSecs; const x0=((t0-(state.overview.ovStartSec||0))/Math.max(1e-6,state.overview.ovSpanSec||totalSec))*W; const x1=((t1-(state.overview.ovStartSec||0))/Math.max(1e-6,state.overview.ovSpanSec||totalSec))*W; const rx0=Math.max(0,Math.min(W,x0)), rx1=Math.max(0,Math.min(W,x1)); ctx.fillStyle='rgba(59,130,246,0.15)'; ctx.fillRect(rx0,0,Math.max(3,rx1-rx0),H); ctx.strokeStyle='rgba(59,130,246,0.6)'; ctx.strokeRect(rx0,0,Math.max(3,rx1-rx0),H); }
@@ -158,7 +181,15 @@ function startOverviewBuild(){
         if(L===1){ prev=sampleMV(0,ps); }
         else{ const vals=new Array(L); for(let j=0;j<L;j++) vals[j]=sampleMV(j,ps); vals.sort((a,b)=>a-b); const mid=L>>1; prev=L%2?vals[mid]:0.5*(vals[mid-1]+vals[mid]); }
       } else prev=seg[0];
-      const segBP=(state.baselineMode==='hp')?highpassIIR(seg,dt,0.5,prev):(function(){ const tmp=Array.from(seg).sort((a,b)=>a-b); const med=tmp.length%2? tmp[(tmp.length-1)>>1] : 0.5*(tmp[tmp.length/2-1]+tmp[tmp.length/2]); for(let k=0;k<Wp;k++) seg[k]-=med; return seg; })();
+      let segBP;
+      if(state.baselineMode==='hp'){
+        const hp=highpassIIR(seg,dt,0.5,prev);
+        const off=seg[0]-hp[0];
+        for(let k=0;k<Wp;k++) hp[k]+=off;
+        segBP=hp;
+      } else {
+        const tmp=Array.from(seg).sort((a,b)=>a-b); const med=tmp.length%2? tmp[(tmp.length-1)>>1] : 0.5*(tmp[tmp.length/2-1]+tmp[tmp.length/2]); for(let k=0;k<Wp;k++) seg[k]-=med; segBP=seg;
+      }
       const res=detectHR(segBP, dur/Wp, Math.max(3,state.hrSmooth|0), true, state.hrTol);
       const bpm=isFinite(res.avg)?res.avg:NaN;
       if(isFinite(bpm)) state.overview.pts.push({t:center,bpm});
@@ -181,7 +212,7 @@ els.scroll.addEventListener('input',()=>{ const max=maxOverviewStart(); state.ov
 els.reset.addEventListener('click',()=>{ state.viewStart=0; state.winSecs=+els.win.value||10; draw(); drawOverview(); });
 els.canvas.addEventListener('wheel', ev=>{ if(!hasData()) return; ev.preventDefault(); const viewS=Math.max(1,Math.round(state.winSecs*state.fs)); const center=state.viewStart+Math.floor(viewS*(ev.offsetX/Math.max(1,state.width))); const factor=ev.deltaY<0?0.9:1.1; state.winSecs=clamp(viewS*factor/state.fs,0.2,600); const newView=Math.max(1,Math.round(state.winSecs*state.fs)); state.viewStart=clamp(center-Math.floor(newView*(ev.offsetX/Math.max(1,state.width))),0,maxViewStart()); updateWinInput(); draw(); drawOverview(); }, {passive:false});
 let dragging=false, dragStartX=0, dragViewStart=0;
-els.canvas.addEventListener('mousedown', ev=>{ if(!hasData()) return; const H=state.height; const hrPane=state.showHR?Math.round(H*0.18):0; const mainH=H-hrPane; const shown=Math.min(3,state.leadCount); const laneH=mainH/Math.max(1,shown); if(ev.shiftKey || state.tool==='time'){ state.caliper={a:xToTime(ev.offsetX), b:null, active:true}; draw(); return; } if(ev.ctrlKey || state.tool==='volt'){ const li=Math.max(0, Math.min(shown-1, Math.floor(ev.offsetY/Math.max(1,laneH)))); state.caliperV={lead:li, yA:ev.offsetY, yB:null, active:true}; draw(); return; } dragging=true; dragStartX=ev.clientX; dragViewStart=state.viewStart; });
+els.canvas.addEventListener('mousedown', ev=>{ if(!hasData()) return; const H=state.height; const hrPane=state.showHR?Math.round(H*0.18):0; const mainH=H-hrPane; const vis=getVisibleLeads(); const shown=vis.length; const pxPerSec=state.width/Math.max(0.2,state.winSecs); const rows=pxPerSec<40?2:1; const laneH=mainH/Math.max(1,shown*rows); if(ev.shiftKey || state.tool==='time'){ state.caliper={a:xToTime(ev.offsetX), b:null, active:true}; draw(); return; } if(ev.ctrlKey || state.tool==='volt'){ const idx=Math.floor(ev.offsetY/Math.max(1,laneH)); const li=Math.max(0, Math.min(shown-1, idx%shown)); state.caliperV={lead:li, yA:ev.offsetY, yB:null, active:true}; draw(); return; } dragging=true; dragStartX=ev.clientX; dragViewStart=state.viewStart; });
 window.addEventListener('mouseup', ()=>{ if(state.caliper.active) state.caliper.active=false; if(state.caliperV.active) state.caliperV.active=false; dragging=false; });
 window.addEventListener('mousemove', ev=>{ if(!hasData()) return; const rect=els.canvas.getBoundingClientRect(); const x=ev.clientX-rect.left; const y=ev.clientY-rect.top; if(state.caliper.active){ state.caliper.b=xToTime(x); draw(); return; } if(state.caliperV.active){ state.caliperV.yB=y; draw(); return; } if(!dragging) return; const dx=ev.clientX-dragStartX; const spp=(state.winSecs*state.fs)/Math.max(1,state.width); state.viewStart=clamp(dragViewStart-Math.round(dx*spp),0,maxViewStart()); draw(); drawOverview(); });
 let ovDragging=false; function setViewFromOverviewEvent(e){ const rect=els.overview.getBoundingClientRect(); const x=e.clientX-rect.left; const W=rect.width; const totalSec=state.totalSamples/state.fs; const T0=Math.max(0,state.overview.ovStartSec||0); const Tspan=Math.max(1e-6,state.overview.ovSpanSec||totalSec); const clickSec=T0+(x/Math.max(1,W))*Tspan; const newStart=Math.max(0,Math.round(clickSec*state.fs)); state.viewStart=Math.min(newStart,maxViewStart()); draw(); drawOverview(); }
@@ -209,7 +240,6 @@ els.leads.addEventListener('change', ()=>{ state.leadCount=Math.max(1,+els.leads
 els.win.addEventListener('change', ()=>{ state.winSecs=Math.max(0.2,+els.win.value||10); syncScroll(); draw(); drawOverview(); });
 els.vfill.addEventListener('input', ()=>{ state.vfill=(+els.vfill.value||65)/100; els.vfillVal.textContent=Math.round(state.vfill*100); draw(); });
 els.autoGain.addEventListener('change', ()=>{ state.autoGain=!!els.autoGain.checked; draw(); });
-els.gainMode.addEventListener('change', ()=>{ state.gainMode=els.gainMode.value; draw(); });
 els.showHR.addEventListener('change', ()=>{ state.showHR=!!els.showHR.checked; draw(); });
 els.hrLock.addEventListener('change', ()=>{ state.hrLockScale=!!els.hrLock.checked; draw(); });
 els.hrSmooth.addEventListener('change', ()=>{ state.hrSmooth=Math.max(1,(+els.hrSmooth.value||5)|0); draw(); drawOverview(); });
