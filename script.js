@@ -145,5 +145,10 @@ els.robustHR.addEventListener('change', ()=>{ state.robustHR=!!els.robustHR.chec
 els.hrTol.addEventListener('change', ()=>{ state.hrTol=Math.max(5,Math.min(80,(+els.hrTol.value||30))); draw(); drawOverview(); });
 els.showScale.addEventListener('change', ()=>{ state.showScaleBar=!!els.showScale.checked; draw(); });
 els.printBtn.addEventListener('click', ()=>window.print());
-function init(){ const r=els.canvas.getBoundingClientRect(); state.width=Math.max(320,r.width|0); state.height=Math.max(240,r.height|0); els.canvas.width=Math.round(state.width*state.dpr); els.canvas.height=Math.round(state.height*state.dpr); const ro=els.overview.getBoundingClientRect(); els.overview.width=Math.round(Math.max(320,ro.width|0)*state.dpr); els.overview.height=Math.round(Math.max(60,ro.height|0)*state.dpr); updateWinInput(); syncScroll(); setStatus('Ready.'); }
-init();
+function init(){
+  resize();
+  updateWinInput();
+  syncScroll();
+  setStatus('Ready.');
+}
+window.addEventListener('load', init);
