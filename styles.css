@@ -22,7 +22,7 @@ button.secondary:active{background:#4b5563}
 .btn-group button.active{background:var(--accent);color:#041017}
 canvas{display:block;width:100%}
 #ecg{height:68vh;background:var(--bg)}
-#overview{height:90px;background:var(--bg);border-top:1px solid #1f2937;border-bottom:1px solid #1f2937}
+#overview{height:90px;background:var(--panel);border-top:2px solid var(--accent);border-bottom:1px solid #1f2937;margin-top:6px}
 .status{padding:8px 16px;color:var(--muted)}
 .status.err{color:#fecaca}
 .sp{flex:1}
