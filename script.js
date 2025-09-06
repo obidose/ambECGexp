@@ -52,25 +52,43 @@ function sampleMV(leadIndex, s){
   if(state.csv){ const a=state.csv[leadIndex]||[]; const S=a.length; const ss=Math.max(0,Math.min(S-1,s|0)); return a[ss]; }
   if(!state.raw) return 0; const total=state.totalSamples|0; const ss=Math.max(0,Math.min(total-1,s|0)); const idx=ss*state.leadCount+leadIndex; if(idx<0||idx>=state.raw.length) return 0; return state.raw[idx]*(state.uvPerLSB/1000);
 }
-function windowSeries(leadIndex){
-  const fs=state.fs,W=state.width; const start=Math.max(0,state.viewStart|0); const nSamp=Math.max(1,Math.round(state.winSecs*fs)); const seg=new Float32Array(W); const denom=Math.max(1,W); const spp=nSamp/denom;
+function windowSeries(leadIndex, startSample, durSecs){
+  const fs=state.fs, W=state.width;
+  const start=Math.max(0,startSample!=null?startSample:state.viewStart|0);
+  const spanSec=durSecs!=null?durSecs:state.winSecs;
+  const nSamp=Math.max(1,Math.round(spanSec*fs));
+  const seg=new Float32Array(W);
+  const spp=nSamp/Math.max(1,W);
   for(let x=0;x<W;x++){
     if(spp>2){
-      const s0=start+Math.floor(x*nSamp/denom), s1=start+Math.floor((x+1)*nSamp/denom)-1; const span=Math.max(0,s1-s0);
-      let acc=0; acc+=sampleMV(leadIndex, s0+Math.floor(0.2*span)); acc+=sampleMV(leadIndex, s0+Math.floor(0.5*span)); acc+=sampleMV(leadIndex, s0+Math.floor(0.8*span)); seg[x]=acc/3;
+      if(x===0){
+        seg[x]=sampleMV(leadIndex,start);
+      } else {
+        const s0=start+Math.floor(x*spp);
+        const s1=start+Math.floor((x+1)*spp)-1;
+        const span=Math.max(0,s1-s0);
+        let acc=0;
+        acc+=sampleMV(leadIndex, s0+Math.floor(0.2*span));
+        acc+=sampleMV(leadIndex, s0+Math.floor(0.5*span));
+        acc+=sampleMV(leadIndex, s0+Math.floor(0.8*span));
+        seg[x]=acc/3;
+      }
     } else {
       const s=start+Math.floor(x*spp);
       seg[x]=sampleMV(leadIndex,s);
     }
   }
-  const dtpx=state.winSecs/Math.max(1,W);
+  const dtpx=spanSec/Math.max(1,W);
   if(state.baselineMode==='hp'){
     const hp=highpassIIR(seg, dtpx, 0.5, sampleMV(leadIndex, start-1));
     const off=seg[0]-hp[0];
     for(let i=0;i<hp.length;i++) hp[i]+=off;
     return hp;
   }
-  const tmp=Array.from(seg).sort((a,b)=>a-b); const med=tmp.length%2? tmp[(tmp.length-1)>>1] : 0.5*(tmp[tmp.length/2-1]+tmp[tmp.length/2]); for(let i=0;i<seg.length;i++) seg[i]-=med; return seg;
+  const tmp=Array.from(seg).sort((a,b)=>a-b);
+  const med=tmp.length%2? tmp[(tmp.length-1)>>1] : 0.5*(tmp[tmp.length/2-1]+tmp[tmp.length/2]);
+  for(let i=0;i<seg.length;i++) seg[i]-=med;
+  return seg;
 }
 function windowRawSegMulti(leads){
   const fs=state.fs|0; const start=Math.max(0,state.viewStart|0); const nSamp=Math.max(1,Math.round(state.winSecs*fs)); const a=new Float32Array(nSamp); const L=leads.length;
@@ -109,8 +127,8 @@ function getVisibleLeads(){ const v=[]; for(let i=0;i<Math.min(3,state.leadCount
 function getOverviewRange(){ const pts=state.overview.pts||[]; let minB=Infinity,maxB=-Infinity; for(const p of pts){ if(!isFinite(p?.bpm)) continue; if(p.bpm<minB) minB=p.bpm; if(p.bpm>maxB) maxB=p.bpm; } if(!isFinite(minB)||!isFinite(maxB)){ minB=60; maxB=180; } const pad=10; minB=Math.max(30,Math.floor((minB-pad)/10)*10); maxB=Math.min(230,Math.ceil((maxB+pad)/10)*10); if(maxB-minB<40){ const mid=(maxB+minB)/2; minB=Math.max(30,mid-30); maxB=Math.min(230,mid+30); } return {minB,maxB}; }
 function getHRScale(windowRes){ if(state.hrLockScale && state.overview && state.overview.range) return state.overview.range; let minB=60,maxB=180; if(windowRes&&windowRes.pts&&windowRes.pts.length){ minB=Math.min(...windowRes.pts.map(p=>p.bpm)); maxB=Math.max(...windowRes.pts.map(p=>p.bpm)); const pad=10; minB=Math.max(30,Math.floor((minB-pad)/10)*10); maxB=Math.min(230,Math.ceil((maxB+pad)/10)*10); if(maxB-minB<40){ const mid=(maxB+minB)/2; minB=Math.max(30,mid-30); maxB=Math.min(230,mid+30); } } return {minB,maxB}; }
 
-function drawPaperGrid(ctx,y0,h,laneH,pxPerSec,gainPx){
-  const t0=state.viewStart/state.fs; const t1=t0+state.winSecs; const smallT=0.04;
+function drawPaperGrid(ctx,y0,h,laneH,pxPerSec,gainPx,t0Sec,tSpanSec){
+  const t0=t0Sec; const t1=t0Sec+tSpanSec; const smallT=0.04;
   const cs=getComputedStyle(document.body);
   for(let t=Math.floor(t0/smallT)*smallT;t<=t1+1e-9;t+=smallT){ const x=(t-t0)*pxPerSec; const big=(Math.round(t/smallT)%5===0); ctx.strokeStyle=big? (cs.getPropertyValue('--grid-strong')||'#999') : (cs.getPropertyValue('--grid-weak')||'#999'); ctx.lineWidth=big?1:0.5; ctx.beginPath(); ctx.moveTo(x,y0); ctx.lineTo(x,y0+h); ctx.stroke(); }
   const gridPxPerMV=gainPx; const step=gridPxPerMV*0.1;
@@ -124,24 +142,37 @@ function draw(){
   ctx.clearRect(0,0,W,H); ctx.fillStyle=cs.getPropertyValue('--bg')||'#0b1021'; ctx.fillRect(0,0,W,H);
   if(!hasData()){ ctx.fillStyle='#94a3b8'; ctx.fillText('Open sample or load an ECG…',12,18); return; }
   const hrPane=state.showHR?Math.round(H*0.18):0; const mainH=H-hrPane; const vis=getVisibleLeads(); const shown=vis.length;
-  const pxPerSec=W/Math.max(0.2,state.winSecs);
   let rows=1;
-  if(pxPerSec<80) rows=2;
-  if(pxPerSec<30) rows=3;
+  let rowWinSecs=state.winSecs;
+  let pxPerSec=W/Math.max(0.2,rowWinSecs);
+  while(pxPerSec<80 && rows<3){ rows++; rowWinSecs=state.winSecs/rows; pxPerSec=W/rowWinSecs; }
   const laneH=mainH/Math.max(1,shown*rows);
-  const segs=[],amps=[];
-  for(let k=0;k<shown;k++){ const li=vis[k]; const seg=windowSeries(li); segs.push(seg); const abs=seg.map(Math.abs).sort((a,b)=>a-b); const p95=abs[Math.max(0,Math.floor(0.95*(abs.length-1)))]; amps.push(p95||0.5); }
+  const segs=Array.from({length:rows},()=>new Array(shown));
+  const amps=new Array(shown).fill(0);
+  for(let r=0;r<rows;r++){
+    const start=state.viewStart + Math.round(r*rowWinSecs*state.fs);
+    for(let k=0;k<shown;k++){
+      const li=vis[k];
+      const seg=windowSeries(li,start,rowWinSecs);
+      segs[r][k]=seg;
+      const abs=seg.map(Math.abs).sort((a,b)=>a-b);
+      const p95=abs[Math.max(0,Math.floor(0.95*(abs.length-1)))]||0.5;
+      if(p95>amps[k]) amps[k]=p95;
+    }
+  }
   let gainPx;
   if(state.autoGain){ const a=Math.max(...amps); const target=Math.max(0.2,a*1.2); gainPx=(laneH*state.vfill)/(2*target); }
   else { gainPx=(laneH*state.vfill)/6; }
   const gains=new Array(shown).fill(gainPx);
-  const comp=clamp((pxPerSec/120),0.3,1); const gainsPlot=gains.map(g=>g*comp);
-  drawPaperGrid(ctx,0,mainH,laneH,pxPerSec,gainPx);
+  const gainsPlot=gains;
   const leadNames=['V1','V3','V5'];
   for(let r=0;r<rows;r++){
+    const rowY=r*shown*laneH;
+    const startSec=state.viewStart/state.fs + r*rowWinSecs;
+    drawPaperGrid(ctx,rowY,shown*laneH,laneH,pxPerSec,gainPx,startSec,rowWinSecs);
     for(let k=0;k<shown;k++){
       const baseY=(r*shown + k + 0.5)*laneH;
-      const seg=segs[k]; const gain=gainsPlot[k];
+      const seg=segs[r][k]; const gain=gainsPlot[k];
       ctx.strokeStyle=cs.getPropertyValue('--trace')||'#a5b4fc'; ctx.lineWidth=1.2; ctx.beginPath();
       for(let x=0;x<W;x++){ const y=baseY - seg[x]*gain; if(x===0) ctx.moveTo(0,y); else ctx.lineTo(x,y); }
       ctx.stroke();
@@ -152,7 +183,27 @@ function draw(){
     }
   }
   if(state.showScaleBar){ const barLen=pxPerSec; const barX=Math.max(8,W-barLen-12); const barY=Math.max(20,mainH-16); ctx.strokeStyle=cs.getPropertyValue('--ink')||'#e5e7eb'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(barX,barY); ctx.lineTo(barX+barLen,barY); ctx.stroke(); for(let k=0;k<=5;k++){ const x=barX+k*(barLen/5), len=(k%5===0)?10:6; ctx.beginPath(); ctx.moveTo(x,barY); ctx.lineTo(x,barY+len); ctx.stroke(); } ctx.fillStyle=cs.getPropertyValue('--muted')||'#94a3b8'; ctx.fillText('1 s', barX+barLen/2-10, barY-4); }
-  if(state.caliper && state.caliper.a!=null && state.caliper.b!=null){ const t0=state.viewStart/state.fs; const a=Math.min(state.caliper.a,state.caliper.b), b=Math.max(state.caliper.a,state.caliper.b); const xA=(a-t0)*pxPerSec, xB=(b-t0)*pxPerSec; const dt=b-a; const bpm=dt>0?60/dt:NaN; ctx.strokeStyle='#22d3ee'; ctx.setLineDash([4,3]); ctx.beginPath(); ctx.moveTo(xA,0); ctx.lineTo(xA,mainH); ctx.stroke(); ctx.beginPath(); ctx.moveTo(xB,0); ctx.lineTo(xB,mainH); ctx.stroke(); ctx.setLineDash([]); const text=`Δt ${(dt*1000).toFixed(0)} ms • ≈${isFinite(bpm)?bpm.toFixed(1):'—'} bpm`; ctx.font='12px system-ui,sans-serif'; const pad=6; const tw=ctx.measureText(text).width+pad*2; const bx=Math.min(W-tw-8, Math.max(8,(xA+xB)/2 - tw/2)); const by=8; ctx.fillStyle=cs.getPropertyValue('--overlay-fill'); ctx.strokeStyle=cs.getPropertyValue('--overlay-stroke'); ctx.lineWidth=1; ctx.fillRect(bx,by,tw,18); ctx.strokeRect(bx,by,tw,18); ctx.fillStyle=cs.getPropertyValue('--overlay-text'); ctx.fillText(text, bx+pad, by+13); }
+  if(state.caliper && state.caliper.a!=null && state.caliper.b!=null){
+    const t0=state.viewStart/state.fs;
+    const a=Math.min(state.caliper.a,state.caliper.b), b=Math.max(state.caliper.a,state.caliper.b);
+    const span=rowWinSecs;
+    const xA=((a-t0)%span)*pxPerSec;
+    const xB=((b-t0)%span)*pxPerSec;
+    const dt=b-a; const bpm=dt>0?60/dt:NaN;
+    ctx.strokeStyle='#22d3ee'; ctx.setLineDash([4,3]);
+    ctx.beginPath(); ctx.moveTo(xA,0); ctx.lineTo(xA,mainH); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(xB,0); ctx.lineTo(xB,mainH); ctx.stroke();
+    ctx.setLineDash([]);
+    const text=`Δt ${(dt*1000).toFixed(0)} ms • ≈${isFinite(bpm)?bpm.toFixed(1):'—'} bpm`;
+    ctx.font='12px system-ui,sans-serif'; const pad=6;
+    const tw=ctx.measureText(text).width+pad*2;
+    const bx=Math.min(W-tw-8, Math.max(8,((xA+xB)/2) - tw/2));
+    const by=8;
+    ctx.fillStyle=cs.getPropertyValue('--overlay-fill');
+    ctx.strokeStyle=cs.getPropertyValue('--overlay-stroke');
+    ctx.lineWidth=1; ctx.fillRect(bx,by,tw,18); ctx.strokeRect(bx,by,tw,18);
+    ctx.fillStyle=cs.getPropertyValue('--overlay-text'); ctx.fillText(text, bx+pad, by+13);
+  }
   if(state.caliperV && state.caliperV.yA!=null && state.caliperV.yB!=null){ const li=Math.max(0, Math.min(shown-1, state.caliperV.lead|0)); const idx=Math.floor(state.caliperV.yA/Math.max(1,laneH)); const row=Math.floor(idx/shown); const baseY=(row*shown + li + 0.5)*laneH; const gain=gainsPlot[li]||1; const yA=state.caliperV.yA,yB=state.caliperV.yB; const dv=(yA-yB)/gain; const vtxt=`ΔV ${dv.toFixed(2)} mV (${leadNames[vis[li]]||('Lead '+(vis[li]+1))})`; const pad=6; const vw=ctx.measureText(vtxt).width+pad*2; const vx=12; const vy=Math.max(16, baseY - laneH*0.35); ctx.strokeStyle='#22d3ee'; ctx.setLineDash([4,3]); ctx.beginPath(); ctx.moveTo(0,yA); ctx.lineTo(W,yA); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0,yB); ctx.lineTo(W,yB); ctx.stroke(); ctx.setLineDash([]); ctx.fillStyle=cs.getPropertyValue('--overlay-fill'); ctx.strokeStyle=cs.getPropertyValue('--overlay-stroke'); ctx.lineWidth=1; ctx.fillRect(vx,vy,vw,18); ctx.strokeRect(vx,vy,vw,18); ctx.fillStyle=cs.getPropertyValue('--overlay-text'); ctx.fillText(vtxt, vx+pad, vy+13); }
   const hrPane2 = state.showHR?Math.round(H*0.18):0; if(hrPane2>0){ const paneY=mainH; const h=hrPane2; const leads=getVisibleLeads(); const segHR=windowRawSegMulti(leads); const dt=1/Math.max(1,state.fs); const res=detectHR(segHR, dt, state.hrSmooth, state.robustHR, state.hrTol); let {minB,maxB}=getHRScale(res); ctx.fillStyle=cs.getPropertyValue('--panel'); ctx.fillRect(0,paneY,W,h); ctx.strokeStyle=cs.getPropertyValue('--grid-strong'); ctx.beginPath(); ctx.moveTo(0,paneY); ctx.lineTo(W,paneY); ctx.stroke(); for(let b=Math.ceil(minB/20)*20; b<=maxB; b+=20){ const y=paneY+h - (b-minB)/(maxB-minB)*h; ctx.strokeStyle=cs.getPropertyValue('--grid-weak'); ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); ctx.fillStyle=cs.getPropertyValue('--muted'); ctx.font='11px system-ui,sans-serif'; ctx.fillText(String(b)+' bpm', 6, y-2); } if(res.pts.length){ const firstY=paneY+h - (res.pts[0].bpm-minB)/(maxB-minB)*h; const lastY=paneY+h - (res.pts[res.pts.length-1].bpm-minB)/(maxB-minB)*h; ctx.strokeStyle=cs.getPropertyValue('--hr')||'#34d399'; ctx.lineWidth=1.8; ctx.beginPath(); ctx.moveTo(0,firstY); for(let i=0;i<res.pts.length;i++){ const x=(res.pts[i].t/state.winSecs)*W; const y=paneY+h - (res.pts[i].bpm-minB)/(maxB-minB)*h; ctx.lineTo(x,y); } ctx.lineTo(W,lastY); ctx.stroke(); const avg=res.avg; ctx.fillStyle=cs.getPropertyValue('--muted'); ctx.font='12px system-ui,sans-serif'; ctx.fillText('HR '+(isFinite(avg)?avg.toFixed(0)+' bpm':'—'), W-90, paneY+14); } }
 }
