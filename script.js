@@ -26,11 +26,27 @@ const clamp=(v,min,max)=>Math.max(min,Math.min(max,v));
 function hasData(){ return (state.raw||state.csv) && state.totalSamples>0; }
 function maxViewStart(){ return Math.max(0,state.totalSamples - Math.max(1,Math.round(state.winSecs*state.fs))); }
 function maxOverviewStart(){ const totalSec=state.totalSamples/state.fs; const span=Math.max(1e-6,state.overview.ovSpanSec||totalSec); return Math.max(0,totalSec-span); }
-function syncScroll(){ const maxS=maxOverviewStart(); els.scroll.max=String(maxS.toFixed(2)); els.scroll.step="0.1"; els.scroll.value=String(Math.max(0,Math.min(state.overview.ovStartSec||0,maxS)).toFixed(2)); }
+function syncScroll(){
+  const totalSec=state.totalSamples/state.fs;
+  const span=state.overview.ovSpanSec||totalSec;
+  const maxS=Math.max(0,totalSec-span);
+  const start=Math.max(0,Math.min(state.overview.ovStartSec||0,maxS));
+  els.scroll.max=String(maxS.toFixed(2));
+  els.scroll.step="0.1";
+  els.scroll.value=String(start.toFixed(2));
+  if(!totalSec){ els.scroll.style.background=''; return; }
+  const p0=(start/totalSec)*100;
+  const p1=((start+span)/totalSec)*100;
+  if(span>=totalSec-1e-6){
+    els.scroll.style.background='var(--accent)';
+  } else {
+    els.scroll.style.background=`linear-gradient(to right, var(--muted) 0%, var(--muted) ${p0}%, var(--accent) ${p0}%, var(--accent) ${p1}%, var(--muted) ${p1}%, var(--muted) 100%)`;
+  }
+}
 function updateWinInput(){ els.win.value=(Math.round(state.winSecs*100)/100).toString(); }
 function xToTime(x){ const t0=state.viewStart/state.fs; return t0 + (x/Math.max(1,state.width))*state.winSecs; }
 function percentile(arr,p){ const tmp=Array.from(arr); if(!tmp.length) return 0; tmp.sort((a,b)=>a-b); const idx=Math.max(0,Math.min(tmp.length-1,Math.floor(p*(tmp.length-1)))); return tmp[idx]; }
-function highpassIIR(arr, dt, fc){ const tau=1/(2*Math.PI*fc); const alpha=tau/(tau+dt); const out=new Float32Array(arr.length); let y=0,prev=arr[0]||0; for(let i=0;i<arr.length;i++){ const x=arr[i]; y=alpha*(y + x - prev); out[i]=y; prev=x; } if(out.length>1) out[0]=out[1]; return out; }
+function highpassIIR(arr, dt, fc, xPrev){ const tau=1/(2*Math.PI*fc); const alpha=tau/(tau+dt); const out=new Float32Array(arr.length); let y=0,prev=xPrev!=null?xPrev:(arr[0]||0); for(let i=0;i<arr.length;i++){ const x=arr[i]; y=alpha*(y + x - prev); out[i]=y; prev=x; } return out; }
 
 function sampleMV(leadIndex, s){
   if(state.csv){ const a=state.csv[leadIndex]||[]; const S=a.length; const ss=Math.max(0,Math.min(S-1,s|0)); return a[ss]; }
@@ -44,13 +60,22 @@ function windowSeries(leadIndex){
     } else { const s=start+Math.floor((x+0.5)*nSamp/denom); seg[x]=sampleMV(leadIndex,s); }
   }
   const dtpx=state.winSecs/Math.max(1,W);
-  if(state.baselineMode==='hp') return highpassIIR(seg, dtpx, 0.5);
+  if(state.baselineMode==='hp') return highpassIIR(seg, dtpx, 0.5, sampleMV(leadIndex, start-1));
   const tmp=Array.from(seg).sort((a,b)=>a-b); const med=tmp.length%2? tmp[(tmp.length-1)>>1] : 0.5*(tmp[tmp.length/2-1]+tmp[tmp.length/2]); for(let i=0;i<seg.length;i++) seg[i]-=med; return seg;
 }
 function windowRawSegMulti(leads){
   const fs=state.fs|0; const start=Math.max(0,state.viewStart|0); const nSamp=Math.max(1,Math.round(state.winSecs*fs)); const a=new Float32Array(nSamp); const L=leads.length;
   for(let i=0;i<nSamp;i++){ if(L===1){ a[i]=sampleMV(leads[0],start+i); } else { const vals=new Array(L); for(let j=0;j<L;j++) vals[j]=sampleMV(leads[j],start+i); vals.sort((x,y)=>x-y); const mid=L>>1; a[i]=(L%2? vals[mid] : 0.5*(vals[mid-1]+vals[mid])); } }
-  if(state.baselineMode==='hp') return highpassIIR(a, 1/Math.max(1,fs), 0.5);
+  if(state.baselineMode==='hp'){
+    let prev;
+    if(start>0){
+      if(L===1){ prev=sampleMV(leads[0], start-1); }
+      else{
+        const vals=new Array(L); for(let j=0;j<L;j++) vals[j]=sampleMV(leads[j], start-1); vals.sort((x,y)=>x-y); const mid=L>>1; prev=L%2?vals[mid]:0.5*(vals[mid-1]+vals[mid]);
+      }
+    } else prev=a[0];
+    return highpassIIR(a, 1/Math.max(1,fs), 0.5, prev);
+  }
   const tmp=Array.from(a).sort((u,v)=>u-v); const med=tmp.length%2? tmp[(tmp.length-1)>>1] : 0.5*(tmp[tmp.length/2-1]+tmp[tmp.length/2]); for(let i=0;i<a.length;i++) a[i]-=med; return a;
 }
 function detectHR(seg, dtpx, smoothBeats, robust=true, tolPct=30){
@@ -102,7 +127,49 @@ function draw(){
   const hrPane2 = state.showHR?Math.round(H*0.18):0; if(hrPane2>0){ const paneY=mainH; const h=hrPane2; const leads=getVisibleLeads(); const segHR=windowRawSegMulti(leads); const dt=1/Math.max(1,state.fs); const res=detectHR(segHR, dt, state.hrSmooth, state.robustHR, state.hrTol); let {minB,maxB}=getHRScale(res); ctx.fillStyle=cs.getPropertyValue('--bg'); ctx.fillRect(0,paneY,W,h); for(let b=Math.ceil(minB/20)*20; b<=maxB; b+=20){ const y=paneY+h - (b-minB)/(maxB-minB)*h; ctx.strokeStyle=cs.getPropertyValue('--grid-weak'); ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); ctx.fillStyle=cs.getPropertyValue('--muted'); ctx.font='11px system-ui,sans-serif'; ctx.fillText(String(b)+' bpm', 6, y-2); } if(res.pts.length){ const firstY=paneY+h - (res.pts[0].bpm-minB)/(maxB-minB)*h; const lastY=paneY+h - (res.pts[res.pts.length-1].bpm-minB)/(maxB-minB)*h; ctx.strokeStyle=cs.getPropertyValue('--hr')||'#34d399'; ctx.lineWidth=1.8; ctx.beginPath(); ctx.moveTo(0,firstY); for(let i=0;i<res.pts.length;i++){ const x=(res.pts[i].t/state.winSecs)*W; const y=paneY+h - (res.pts[i].bpm-minB)/(maxB-minB)*h; ctx.lineTo(x,y); } ctx.lineTo(W,lastY); ctx.stroke(); const avg=res.avg; ctx.fillStyle=cs.getPropertyValue('--muted'); ctx.font='12px system-ui,sans-serif'; ctx.fillText('HR '+(isFinite(avg)?avg.toFixed(0)+' bpm':'—'), W-90, paneY+14); } }
 }
 function drawOverview(){ const ctx=els.overview.getContext('2d'); const dpr=state.dpr; ctx.setTransform(dpr,0,0,dpr,0,0); const W=els.overview.clientWidth||600,H=els.overview.clientHeight||80; const cs=getComputedStyle(document.body); ctx.clearRect(0,0,W,H); ctx.fillStyle=cs.getPropertyValue('--bg'); ctx.fillRect(0,0,W,H); if(!hasData()){ ctx.fillStyle=cs.getPropertyValue('--muted'); ctx.fillText('Load a file to build HR overview…',12,16); return; } const totalSec=state.totalSamples/state.fs; const T0=Math.max(0,state.overview.ovStartSec||0); const Tspan=Math.max(1e-6,state.overview.ovSpanSec||totalSec); const Tend=Math.min(totalSec,T0+Tspan); const pts=state.overview.pts||[]; if(!pts.length){ ctx.fillStyle=cs.getPropertyValue('--muted'); const msg=state.overview.building?('Building HR overview… '+Math.round((state.overview.progress||0)*100)+'%'):'HR overview not built'; ctx.fillText(msg,12,16); } else { const range=state.overview.range||getOverviewRange(); const minB=range.minB,maxB=range.maxB; for(let b=Math.ceil(minB/20)*20; b<=maxB; b+=20){ const y=H - (b-minB)/(maxB-minB)*H; ctx.strokeStyle=cs.getPropertyValue('--grid-weak'); ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); ctx.fillStyle=cs.getPropertyValue('--muted'); ctx.font='10px system-ui,sans-serif'; ctx.fillText(b+' bpm',4,y-2); } ctx.strokeStyle=cs.getPropertyValue('--hr-ov')||'#93c5fd'; ctx.lineWidth=1.5; ctx.beginPath(); let moved=false; for(const p of pts){ const t=p.t; if(t<T0||t>Tend||!isFinite(p?.bpm)) continue; const x=((t-T0)/Tspan)*W; const y=H - (p.bpm-minB)/(maxB-minB)*H; if(!moved){ ctx.moveTo(x,y); moved=true; } else ctx.lineTo(x,y); } if(moved) ctx.stroke(); } const t0=state.viewStart/state.fs, t1=t0+state.winSecs; const x0=((t0-(state.overview.ovStartSec||0))/Math.max(1e-6,state.overview.ovSpanSec||totalSec))*W; const x1=((t1-(state.overview.ovStartSec||0))/Math.max(1e-6,state.overview.ovSpanSec||totalSec))*W; const rx0=Math.max(0,Math.min(W,x0)), rx1=Math.max(0,Math.min(W,x1)); ctx.fillStyle='rgba(59,130,246,0.15)'; ctx.fillRect(rx0,0,Math.max(3,rx1-rx0),H); ctx.strokeStyle='rgba(59,130,246,0.6)'; ctx.strokeRect(rx0,0,Math.max(3,rx1-rx0),H); }
-function startOverviewBuild(){ if(!hasData()) return; state.overview={pts:[],building:true,progress:0,ovStartSec:0,ovSpanSec:state.totalSamples/state.fs,range:null}; const totalSec=state.totalSamples/state.fs; const stepSec=4,winSec=8; let iStep=0; const totalSteps=Math.max(1,Math.ceil(totalSec/stepSec)); const perChunk=120; function chunk(){ const Wp=600; let done=0; for(;iStep<totalSteps && done<perChunk;iStep++,done++){ const center=iStep*stepSec; const t0=Math.max(0,center-winSec/2), t1=Math.min(totalSec,center+winSec/2); const dur=Math.max(1e-6,t1-t0); const seg=new Float32Array(Wp); for(let x=0;x<Wp;x++){ const t=t0+(x/Wp)*dur; const s=Math.min(state.totalSamples-1,Math.floor(t*state.fs)); const L=Math.max(1,state.leadCount|0); if(L===1){ seg[x]=sampleMV(0,s); } else { const vals=new Array(L); for(let j=0;j<L;j++) vals[j]=sampleMV(j,s); vals.sort((a,b)=>a-b); const mid=L>>1; seg[x]=(L%2? vals[mid] : 0.5*(vals[mid-1]+vals[mid])); } } const dt=dur/Math.max(1,Wp); const segBP=(state.baselineMode==='hp')?highpassIIR(seg,dt,0.5):(function(){ const tmp=Array.from(seg).sort((a,b)=>a-b); const med=tmp.length%2? tmp[(tmp.length-1)>>1] : 0.5*(tmp[tmp.length/2-1]+tmp[tmp.length/2]); for(let k=0;k<Wp;k++) seg[k]-=med; return seg; })(); const res=detectHR(segBP, dur/Wp, Math.max(3,state.hrSmooth|0), true, state.hrTol); const bpm=isFinite(res.avg)?res.avg:NaN; if(isFinite(bpm)) state.overview.pts.push({t:center,bpm}); } state.overview.progress=iStep/totalSteps; drawOverview(); if(iStep<totalSteps){ setTimeout(chunk,0); } else { state.overview.building=false; state.overview.range=getOverviewRange(); drawOverview(); } } chunk(); }
+function startOverviewBuild(){
+  if(!hasData()) return;
+  state.overview={pts:[],building:true,progress:0,ovStartSec:0,ovSpanSec:state.totalSamples/state.fs,range:null};
+  const totalSec=state.totalSamples/state.fs;
+  const stepSec=4,winSec=8;
+  let iStep=0;
+  const totalSteps=Math.max(1,Math.ceil(totalSec/stepSec));
+  const perChunk=120;
+  function chunk(){
+    const Wp=600;
+    let done=0;
+    for(;iStep<totalSteps && done<perChunk;iStep++,done++){
+      const center=iStep*stepSec;
+      const t0=Math.max(0,center-winSec/2), t1=Math.min(totalSec,center+winSec/2);
+      const dur=Math.max(1e-6,t1-t0);
+      const seg=new Float32Array(Wp);
+      for(let x=0;x<Wp;x++){
+        const t=t0+(x/Wp)*dur;
+        const s=Math.min(state.totalSamples-1,Math.floor(t*state.fs));
+        const L=Math.max(1,state.leadCount|0);
+        if(L===1){ seg[x]=sampleMV(0,s); }
+        else{ const vals=new Array(L); for(let j=0;j<L;j++) vals[j]=sampleMV(j,s); vals.sort((a,b)=>a-b); const mid=L>>1; seg[x]=(L%2? vals[mid] : 0.5*(vals[mid-1]+vals[mid])); }
+      }
+      const dt=dur/Math.max(1,Wp);
+      let prev;
+      const startSample=Math.max(0,Math.floor(t0*state.fs));
+      if(startSample>0){
+        const ps=startSample-1; const L=Math.max(1,state.leadCount|0);
+        if(L===1){ prev=sampleMV(0,ps); }
+        else{ const vals=new Array(L); for(let j=0;j<L;j++) vals[j]=sampleMV(j,ps); vals.sort((a,b)=>a-b); const mid=L>>1; prev=L%2?vals[mid]:0.5*(vals[mid-1]+vals[mid]); }
+      } else prev=seg[0];
+      const segBP=(state.baselineMode==='hp')?highpassIIR(seg,dt,0.5,prev):(function(){ const tmp=Array.from(seg).sort((a,b)=>a-b); const med=tmp.length%2? tmp[(tmp.length-1)>>1] : 0.5*(tmp[tmp.length/2-1]+tmp[tmp.length/2]); for(let k=0;k<Wp;k++) seg[k]-=med; return seg; })();
+      const res=detectHR(segBP, dur/Wp, Math.max(3,state.hrSmooth|0), true, state.hrTol);
+      const bpm=isFinite(res.avg)?res.avg:NaN;
+      if(isFinite(bpm)) state.overview.pts.push({t:center,bpm});
+    }
+    state.overview.progress=iStep/totalSteps;
+    drawOverview();
+    if(iStep<totalSteps){ setTimeout(chunk,0); }
+    else { state.overview.building=false; state.overview.range=getOverviewRange(); drawOverview(); }
+  }
+  chunk();
+}
 function resize(){ const r=els.canvas.getBoundingClientRect(); state.width=Math.max(320,r.width|0); state.height=Math.max(240,r.height|0); els.canvas.width=Math.round(state.width*state.dpr); els.canvas.height=Math.round(state.height*state.dpr); const ro=els.overview.getBoundingClientRect(); els.overview.width=Math.round(Math.max(320,ro.width|0)*state.dpr); els.overview.height=Math.round(Math.max(60,ro.height|0)*state.dpr); draw(); drawOverview(); }
 window.addEventListener('resize', resize);
 function setTool(name){ state.tool=name; [els.toolPan,els.toolTime,els.toolVolt].forEach(b=>b.classList.remove('active')); (name==='pan'?els.toolPan:(name==='time'?els.toolTime:els.toolVolt)).classList.add('active'); state.caliper.active=false; state.caliperV.active=false; }
@@ -110,7 +177,7 @@ els.toolPan.addEventListener('click',()=>setTool('pan'));
 els.toolTime.addEventListener('click',()=>setTool('time'));
 els.toolVolt.addEventListener('click',()=>setTool('volt'));
 [els.showL0,els.showL1,els.showL2].forEach((cb,i)=>cb.addEventListener('change',()=>{ state.showLeads[i]=!!cb.checked; draw(); }));
-els.scroll.addEventListener('input',()=>{ const max=maxOverviewStart(); state.overview.ovStartSec=clamp(+els.scroll.value,0,max); drawOverview(); });
+els.scroll.addEventListener('input',()=>{ const max=maxOverviewStart(); state.overview.ovStartSec=clamp(+els.scroll.value,0,max); syncScroll(); drawOverview(); });
 els.reset.addEventListener('click',()=>{ state.viewStart=0; state.winSecs=+els.win.value||10; draw(); drawOverview(); });
 els.canvas.addEventListener('wheel', ev=>{ if(!hasData()) return; ev.preventDefault(); const viewS=Math.max(1,Math.round(state.winSecs*state.fs)); const center=state.viewStart+Math.floor(viewS*(ev.offsetX/Math.max(1,state.width))); const factor=ev.deltaY<0?0.9:1.1; state.winSecs=clamp(viewS*factor/state.fs,0.2,600); const newView=Math.max(1,Math.round(state.winSecs*state.fs)); state.viewStart=clamp(center-Math.floor(newView*(ev.offsetX/Math.max(1,state.width))),0,maxViewStart()); updateWinInput(); draw(); drawOverview(); }, {passive:false});
 let dragging=false, dragStartX=0, dragViewStart=0;

@@ -26,6 +26,9 @@ canvas{display:block;width:100%}
 .status.err{color:#fecaca}
 .sp{flex:1}
 #scrollWrap{padding:6px 16px;background:var(--panel);border-top:1px solid #1f2937}
+#scroll{appearance:none;width:100%;height:6px;border-radius:3px;background:var(--muted);outline:none}
+#scroll::-webkit-slider-thumb{appearance:none;width:14px;height:14px;border-radius:50%;background:var(--accent);border:0;cursor:pointer}
+#scroll::-moz-range-thumb{width:14px;height:14px;border:none;border-radius:50%;background:var(--accent);cursor:pointer}
 @media print{ header,#overview,.status,#scrollWrap{display:none!important} body{background:#fff;color:#000} #ecg{height:auto} }
 .theme-light{
   --bg:#f8fafc;--panel:#fff;--ink:#0f172a;--muted:#475569;
