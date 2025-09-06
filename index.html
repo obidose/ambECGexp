@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ECG Explorer – Stable v1</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="theme-dark">
+  <header>
+    <input id="file" type="file" accept=".ecg,.bin,.csv,.txt,.dat" />
+    <label>Leads <input id="leads" type="number" value="3" min="1" max="12"></label>
+    <label>fs (Hz) <input id="fs" type="number" value="200" min="25" step="1"></label>
+    <label>uV/LSB <input id="uv" type="number" value="2" min="1" step="1"></label>
+    <label>Window (s) <input id="win" type="number" value="10" min="0.2" step="0.1"></label>
+    <label>Lead height (%) <input id="vfill" type="range" min="30" max="95" value="65"> <span id="vfillVal">65</span></label>
+    <label><input id="autoGain" type="checkbox" checked> Auto-gain</label>
+    <label>Gain
+      <select id="gainMode"><option value="global" selected>Global</option><option value="perlead">Per-lead</option></select>
+    </label>
+    <label><input id="showHR" type="checkbox" checked> Show HR</label>
+    <label><input id="hrLock" type="checkbox" checked> Lock HR scale</label>
+    <label>HR smooth <input id="hrSmooth" type="number" value="5" min="1" max="15" step="1"></label>
+    <label><input id="robustHR" type="checkbox" checked> Robust HR</label>
+    <label>Outlier tol (%) <input id="hrTol" type="number" value="30" min="5" max="80" step="5"></label>
+    <label>Baseline
+      <select id="baseline"><option value="none">None</option><option value="hp" selected>High-pass 0.5 Hz</option></select>
+    </label>
+    <span class="btn-group">Calipers:
+      <button id="toolPan" class="secondary">Pan</button>
+      <button id="toolTime" class="secondary">Time</button>
+      <button id="toolVolt" class="secondary">Voltage</button>
+    </span>
+    <label><input id="showScale" type="checkbox" checked> 1s scale bar</label>
+    <span>Show
+      <label><input id="showL0" type="checkbox" checked>V1</label>
+      <label><input id="showL1" type="checkbox" checked>V3</label>
+      <label><input id="showL2" type="checkbox" checked>V5</label>
+    </span>
+    <span class="sp"></span>
+    <label>Theme
+      <select id="theme"><option value="dark" selected>Dark</option><option value="ecg">ECG paper</option></select>
+    </label>
+    <button id="sample" class="secondary">Open sample</button>
+    <button id="reset" class="secondary">Reset view</button>
+    <button id="print" class="secondary">Print</button>
+  </header>
+  <canvas id="ecg"></canvas>
+  <canvas id="overview"></canvas>
+  <div id="scrollWrap">
+    <input id="scroll" type="range" min="0" value="0" step="1" style="width:100%">
+  </div>
+  <div id="status" class="status">Ready. Click Open sample, or load your .ecg (fs=200, uV/LSB=2).</div>
+  <script src="script.js"></script>
+</body>
+</html>
