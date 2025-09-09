@@ -6,7 +6,7 @@ const els = {
   baseline:document.getElementById('baseline'), toolPan:document.getElementById('toolPan'), toolTime:document.getElementById('toolTime'), toolVolt:document.getElementById('toolVolt'),
   showScale:document.getElementById('showScale'), showL0:document.getElementById('showL0'), showL1:document.getElementById('showL1'), showL2:document.getElementById('showL2'),
   theme:document.getElementById('theme'), reset:document.getElementById('reset'), printBtn:document.getElementById('print'),
-  onlineFiles:document.getElementById('onlineFiles'),
+  onlineFiles:document.getElementById('onlineFiles'), deviceProps:document.getElementById('deviceProps'), advancedHR:document.getElementById('advancedHR'),
   canvas:document.getElementById('ecg'), overview:document.getElementById('overview'), status:document.getElementById('status'), scroll:document.getElementById('scroll')
 };
 const state = {
@@ -309,8 +309,8 @@ function drawHRRow(ctx, cs, rowIndex, totalRows, rowWinSecs, hrPaneY, hrH, W) {
     ctx.lineTo(W, y);
     ctx.stroke();
     
-    // Show labels only on first row
-    if(rowIndex === 0 && hrH > 30){
+    // Show labels on all rows when there's enough space
+    if(hrH > 30){
       ctx.fillStyle = cs.getPropertyValue('--muted');
       ctx.font = '9px system-ui,sans-serif';
       ctx.fillText(String(b), 2, y - 1);
@@ -713,6 +713,99 @@ function init(){
   syncScroll();
   setStatus('Ready.');
 }
+
+// ===== SETTINGS DIALOGS =====
+function showDevicePropertiesDialog() {
+  const dialog = document.createElement('div');
+  dialog.className = 'settings-dialog';
+  dialog.innerHTML = `
+    <div class="settings-content">
+      <h3>Device Properties</h3>
+      <label>Sampling Rate (Hz): <input type="number" id="temp-fs" value="${els.fs.value}" min="25" step="1" style="width:80px"></label>
+      <label>µV/LSB: <input type="number" id="temp-uv" value="${els.uv.value}" min="1" step="1" style="width:80px"></label>
+      <div class="settings-buttons">
+        <button class="settings-ok-btn">OK</button>
+        <button class="settings-cancel-btn">Cancel</button>
+      </div>
+    </div>
+  `;
+  
+  document.body.appendChild(dialog);
+  
+  dialog.addEventListener('click', (e) => {
+    if (e.target.classList.contains('settings-ok-btn')) {
+      els.fs.value = document.getElementById('temp-fs').value;
+      els.uv.value = document.getElementById('temp-uv').value;
+      state.fs = +els.fs.value || 200;
+      state.uvPerLSB = +els.uv.value || 2;
+      syncScroll();
+      draw();
+      drawOverview();
+      document.body.removeChild(dialog);
+    } else if (e.target.classList.contains('settings-cancel-btn') || e.target === dialog) {
+      document.body.removeChild(dialog);
+    }
+  });
+}
+
+function showAdvancedHRDialog() {
+  const dialog = document.createElement('div');
+  dialog.className = 'settings-dialog';
+  dialog.innerHTML = `
+    <div class="settings-content">
+      <h3>Advanced HR Settings</h3>
+      <label><input type="checkbox" id="temp-hrLock" ${els.hrLock.checked ? 'checked' : ''}> Lock HR Scale</label>
+      <label><input type="checkbox" id="temp-robustHR" ${els.robustHR.checked ? 'checked' : ''}> Robust HR Detection</label>
+      <label>Outlier Tolerance: <input type="number" id="temp-hrTol" value="${els.hrTol.value}" min="5" max="80" step="5" style="width:60px">%</label>
+      <label>Baseline Filter: 
+        <select id="temp-baseline" style="width:120px">
+          <option value="none" ${els.baseline.value === 'none' ? 'selected' : ''}>None</option>
+          <option value="hp" ${els.baseline.value === 'hp' ? 'selected' : ''}>High-pass 0.5 Hz</option>
+        </select>
+      </label>
+      <div class="settings-buttons">
+        <button class="settings-ok-btn">OK</button>
+        <button class="settings-cancel-btn">Cancel</button>
+      </div>
+    </div>
+  `;
+  
+  document.body.appendChild(dialog);
+  
+  dialog.addEventListener('click', (e) => {
+    if (e.target.classList.contains('settings-ok-btn')) {
+      els.hrLock.checked = document.getElementById('temp-hrLock').checked;
+      els.robustHR.checked = document.getElementById('temp-robustHR').checked;
+      els.hrTol.value = document.getElementById('temp-hrTol').value;
+      els.baseline.value = document.getElementById('temp-baseline').value;
+      
+      state.hrTol = +els.hrTol.value || 30;
+      draw();
+      drawOverview();
+      document.body.removeChild(dialog);
+    } else if (e.target.classList.contains('settings-cancel-btn') || e.target === dialog) {
+      document.body.removeChild(dialog);
+    }
+  });
+}
+
+els.deviceProps.addEventListener('click', showDevicePropertiesDialog);
+els.advancedHR.addEventListener('click', showAdvancedHRDialog);
+
+// Add dialog styles
+const dialogStyles = document.createElement('style');
+dialogStyles.textContent = `
+  .settings-dialog { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); z-index: 1000; display: flex; align-items: center; justify-content: center; }
+  .settings-content { background: var(--panel); border: 1px solid var(--muted); border-radius: 8px; padding: 24px; min-width: 300px; box-shadow: 0 8px 32px rgba(0,0,0,0.5); }
+  .settings-content h3 { margin: 0 0 20px 0; color: var(--ink); text-align: center; }
+  .settings-content label { display: block; margin: 12px 0; color: var(--ink); }
+  .settings-content input, .settings-content select { background: var(--bg); color: var(--ink); border: 1px solid var(--muted); border-radius: 4px; padding: 6px 8px; margin-left: 8px; }
+  .settings-buttons { display: flex; gap: 12px; justify-content: center; margin-top: 20px; }
+  .settings-ok-btn { background: var(--accent); color: white; border: 0; padding: 8px 16px; border-radius: 4px; cursor: pointer; }
+  .settings-cancel-btn { background: var(--muted); color: var(--bg); border: 0; padding: 8px 16px; border-radius: 4px; cursor: pointer; }
+  .settings-ok-btn:hover, .settings-cancel-btn:hover { filter: brightness(1.1); }
+`;
+document.head.appendChild(dialogStyles);
 
 // ===== DEMO FILES FUNCTIONALITY (Remove this section for production) =====
 const demoFiles = [

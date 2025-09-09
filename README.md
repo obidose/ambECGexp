@@ -1,9 +1,9 @@
-# ECG Explorer (Stable v1)
+# ECG Explorer
 
-A fast, single‑page ECG viewer that runs entirely in your browser.  
-Load long recordings, pan/zoom smoothly, estimate heart rate, place time & voltage calipers, and print — no backend needed.
+A fast, lightweight ECG viewer that runs entirely in your browser.  
+Load long recordings, pan/zoom smoothly, visualize heart rate, and measure with precision calipers — no server required.
 
-> **Defaults for your recorder:** 3 leads (V1, V3, V5), **fs = 200 Hz**, **uV/LSB = 2**.
+> **Clean, minimal interface** optimized for essential ECG analysis tasks.
 
 ---
 
@@ -12,39 +12,34 @@ Load long recordings, pan/zoom smoothly, estimate heart rate, place time & volta
 - **File support**
   - **Binary**: 16‑bit signed **little‑endian**, *interleaved per sample* (L0,L1,L2, L0,L1,L2, …).
   - **CSV/TXT**: numeric columns = leads (values assumed in **mV**).
-- **Multi‑lead viewer** (up to 3 visible at once), with global or per‑lead **auto‑gain**.
-- **True ECG paper grid**
-  - Time: minor **0.04 s**, major **0.20 s**.
-  - Voltage: minor **0.1 mV**, major **0.5 mV**.
-  - Per‑lead **1 mV × 200 ms** calibration box.
-- **Heart rate (HR)**
-  - Window HR trace (top) + **overview HR** (bottom) spanning the full recording.
-  - Optional **locked HR scale** so highs/lows are visually comparable across windows.
-  - Robust detector with **beat smoothing** and **outlier tolerance**.
-- **Calipers**
-  - **Time** (Δt in ms, with bpm from RR).
-  - **Voltage** (ΔV in mV), lane‑aware.
-- **Navigation**
-  - Scroll bar, drag‑to‑pan, wheel zoom, overview navigator (drag/zoom/double‑click reset).
-- **Signal conditioning**
-  - Baseline: **High‑pass 0.5 Hz** or **None**.
-- **Themes**
-  - Dark, ECG paper (black trace on pink grid).
-- **Print**
-  - Browser print to paper/PDF with clean margins.
-- **Privacy**
-  - 100% client‑side: your ECG never leaves your machine.
+- **Multi‑row ECG display** with automatic splitting for long time windows
+- **Real-time heart rate visualization** synchronized across all ECG rows  
+- **Multi-lead support** (V1, V3, V5) with individual lead toggles
+- **Precision measurement tools**
+  - **Time calipers** (Δt in ms, with bpm calculation)
+  - **Voltage calipers** (ΔV in mV) with lane awareness
+- **Smart navigation**
+  - Mouse-centered zoom with smooth layout transitions
+  - Drag-to-pan, overview navigator with zoom capability
+  - Scroll bar for quick positioning
+- **Professional themes** (Dark, Light, Ocean, ECG Paper, Mint, Sunset, Purple)
+- **Advanced signal processing** 
+  - Baseline correction and filtering (configurable in advanced settings)
+  - Robust HR detection with outlier rejection
+- **Clean, minimal interface** 
+  - Essential controls visible, advanced options in settings dialogs
+  - Device properties (sampling rate, voltage scaling) in dedicated panel
+- **Complete privacy** - 100% client-side processing
 
 ---
 
 ## 🚀 Getting started
 
-1. Download or clone the repo.
-2. Open `index.html` in Chrome/Edge/Firefox.
-3. Click **Open sample** to verify.
-4. Load your file:
-   - Set **fs = 200**, **uV/LSB = 2**, **Leads = 3** (V1/V3/V5) for your device.
-   - For CSV: scaling is assumed already in **mV**; `uV/LSB` is ignored.
+1. Open `index.html` in any modern web browser
+2. Click the **📁** button for demo files, or use **Choose File** to load your ECG data
+3. Configure device properties using the **⚙️** button if needed (sampling rate, voltage scaling)
+4. Use the **⚡** button for advanced HR settings if required
+5. Navigate with mouse wheel (zoom), drag (pan), or the overview bar
 
 ---
 
@@ -195,10 +190,6 @@ git push -u origin main
 ```
 
 ---
-
-## 📄 License
-
-MIT — see `LICENSE`.
 
 ---
 

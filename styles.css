@@ -27,6 +27,9 @@ input[type="range"]{margin:0}
 .demo-btn{background:var(--muted);border:0;color:var(--bg);padding:4px 8px;border-radius:4px;font-size:14px;cursor:pointer;transition:all .15s;margin-left:4px}
 .demo-btn:hover{background:var(--accent);color:white}
 .demo-btn:active{transform:scale(0.96)}
+.settings-btn{background:var(--bg);border:1px solid var(--muted);color:var(--muted);padding:3px 6px;border-radius:4px;font-size:12px;cursor:pointer;transition:all .15s;margin-left:2px}
+.settings-btn:hover{background:var(--accent);color:white;border-color:var(--accent)}
+.settings-btn:active{transform:scale(0.96)}
 canvas{display:block;width:100%}
 #ecg{height:68vh;background:var(--bg)}
 #overview{height:90px;background:var(--panel);border-top:2px solid var(--accent);border-bottom:1px solid #1f2937;margin-top:6px}
