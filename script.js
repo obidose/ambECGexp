@@ -5,7 +5,7 @@ const els = {
   showHR:document.getElementById('showHR'), hrLock:document.getElementById('hrLock'), hrSmooth:document.getElementById('hrSmooth'), robustHR:document.getElementById('robustHR'), hrTol:document.getElementById('hrTol'),
   baseline:document.getElementById('baseline'), toolPan:document.getElementById('toolPan'), toolTime:document.getElementById('toolTime'), toolVolt:document.getElementById('toolVolt'),
   showScale:document.getElementById('showScale'), showL0:document.getElementById('showL0'), showL1:document.getElementById('showL1'), showL2:document.getElementById('showL2'),
-  theme:document.getElementById('theme'), sample:document.getElementById('sample'), reset:document.getElementById('reset'), printBtn:document.getElementById('print'),
+  theme:document.getElementById('theme'), reset:document.getElementById('reset'), printBtn:document.getElementById('print'),
   canvas:document.getElementById('ecg'), overview:document.getElementById('overview'), status:document.getElementById('status'), scroll:document.getElementById('scroll')
 };
 const state = {
@@ -45,8 +45,50 @@ function syncScroll(){
 }
 function updateWinInput(){ els.win.value=(Math.round(state.winSecs*100)/100).toString(); }
 function xToTime(x){ const t0=state.viewStart/state.fs; return t0 + (x/Math.max(1,state.width))*state.winSecs; }
+
+function xyToTime(x, y) {
+  const t0 = state.viewStart / state.fs;
+  
+  // Determine which row this y coordinate is in
+  const vis = getVisibleLeads();
+  const shown = vis.length;
+  let rows = 1;
+  let rowWinSecs = state.winSecs;
+  let pxPerSec = state.width / Math.max(0.2, rowWinSecs);
+  while(pxPerSec < 80 && rows < 3) { rows++; rowWinSecs = state.winSecs / rows; pxPerSec = state.width / rowWinSecs; }
+  
+  const minHRHeight = 30;
+  const hrRowHeight = state.showHR ? Math.max(minHRHeight, Math.round(state.height * 0.08)) : 0;
+  const totalHRSpace = state.showHR ? rows * hrRowHeight : 0;
+  const totalECGSpace = state.height - totalHRSpace;
+  const totalRowHeight = totalECGSpace / rows + hrRowHeight;
+  const laneH = totalECGSpace / (rows * shown);
+  
+  const row = Math.floor(y / totalRowHeight);
+  const clampedRow = Math.max(0, Math.min(rows - 1, row));
+  
+  // Calculate time for this row
+  const rowStartTime = t0 + clampedRow * rowWinSecs;
+  const relativeX = x / Math.max(1, state.width);
+  return rowStartTime + relativeX * rowWinSecs;
+}
 function percentile(arr,p){ const tmp=Array.from(arr); if(!tmp.length) return 0; tmp.sort((a,b)=>a-b); const idx=Math.max(0,Math.min(tmp.length-1,Math.floor(p*(tmp.length-1)))); return tmp[idx]; }
-function highpassIIR(arr, dt, fc, xPrev){ const tau=1/(2*Math.PI*fc); const alpha=tau/(tau+dt); const out=new Float32Array(arr.length); let y=0,prev=xPrev!=null?xPrev:(arr[0]||0); for(let i=0;i<arr.length;i++){ const x=arr[i]; y=alpha*(y + x - prev); out[i]=y; prev=x; } return out; }
+function highpassIIR(arr, dt, fc, xPrev){ 
+  const tau=1/(2*Math.PI*fc); 
+  const alpha=tau/(tau+dt); 
+  const out=new Float32Array(arr.length); 
+  const prev=xPrev!=null?xPrev:(arr[0]||0);
+  // Initialize y to steady-state value to avoid transient at start
+  let y = arr.length > 0 ? arr[0] - prev : 0;
+  let prevSample = prev;
+  for(let i=0;i<arr.length;i++){ 
+    const x=arr[i]; 
+    y=alpha*(y + x - prevSample); 
+    out[i]=y; 
+    prevSample=x; 
+  } 
+  return out; 
+}
 
 function sampleMV(leadIndex, s){
   if(state.csv){ const a=state.csv[leadIndex]||[]; const S=a.length; const ss=Math.max(0,Math.min(S-1,s|0)); return a[ss]; }
@@ -57,22 +99,37 @@ function windowSeries(leadIndex, startSample, durSecs){
   const start=Math.max(0,startSample!=null?startSample:state.viewStart|0);
   const spanSec=durSecs!=null?durSecs:state.winSecs;
   const nSamp=Math.max(1,Math.round(spanSec*fs));
+  
+  // Extend the window for better baseline calculation context
+  const extendSec = 1.0; // Extend by 1 second on each side
+  const extendSamp = Math.round(extendSec * fs);
+  const extStart = Math.max(0, start - extendSamp);
+  const extEnd = Math.min(state.totalSamples - 1, start + nSamp + extendSamp);
+  const extLength = extEnd - extStart + 1;
+  
+  // Create extended segment for baseline calculation
+  const extSeg = new Float32Array(extLength);
   const seg=new Float32Array(W);
+  // First, populate the extended segment
+  const extSpp = extLength / Math.max(1, extLength);
+  for(let i = 0; i < extLength; i++){
+    const s = extStart + i;
+    extSeg[i] = sampleMV(leadIndex, s);
+  }
+  
+  // Now downsample to display width, but use extended data for context
   const spp=nSamp/Math.max(1,W);
   for(let x=0;x<W;x++){
     if(spp>2){
-      if(x===0){
-        seg[x]=sampleMV(leadIndex,start);
-      } else {
-        const s0=start+Math.floor(x*spp);
-        const s1=start+Math.floor((x+1)*spp)-1;
-        const span=Math.max(0,s1-s0);
-        let acc=0;
-        acc+=sampleMV(leadIndex, s0+Math.floor(0.2*span));
-        acc+=sampleMV(leadIndex, s0+Math.floor(0.5*span));
-        acc+=sampleMV(leadIndex, s0+Math.floor(0.8*span));
-        seg[x]=acc/3;
-      }
+      // Apply consistent downsampling to all pixels, including the first one
+      const s0=start+Math.floor(x*spp);
+      const s1=start+Math.floor((x+1)*spp)-1;
+      const span=Math.max(0,s1-s0);
+      let acc=0;
+      acc+=sampleMV(leadIndex, s0+Math.floor(0.2*span));
+      acc+=sampleMV(leadIndex, s0+Math.floor(0.5*span));
+      acc+=sampleMV(leadIndex, s0+Math.floor(0.8*span));
+      seg[x]=acc/3;
     } else {
       const s=start+Math.floor(x*spp);
       seg[x]=sampleMV(leadIndex,s);
@@ -80,31 +137,118 @@ function windowSeries(leadIndex, startSample, durSecs){
   }
   const dtpx=spanSec/Math.max(1,W);
   if(state.baselineMode==='hp'){
-    const hp=highpassIIR(seg, dtpx, 0.5, sampleMV(leadIndex, start-1));
-    const off=seg[0]-hp[0];
-    for(let i=0;i<hp.length;i++) hp[i]+=off;
-    return hp;
+    // Use extended data for better baseline calculation
+    const extDt = extendSec * 2 / Math.max(1, extLength);
+    const windowSize = Math.min(extLength, Math.max(10, Math.round(0.5 / extDt))); // ~0.5 second window
+    const extResult = new Float32Array(extLength);
+    
+    // Calculate baseline removal on extended data
+    for(let i = 0; i < extLength; i++) {
+      let sum = 0;
+      let count = 0;
+      const winStart = Math.max(0, i - windowSize);
+      const winEnd = Math.min(extLength - 1, i + windowSize);
+      
+      for(let j = winStart; j <= winEnd; j++) {
+        sum += extSeg[j];
+        count++;
+      }
+      
+      const localBaseline = sum / count;
+      extResult[i] = extSeg[i] - localBaseline;
+    }
+    
+    // Extract the visible portion from the processed extended data
+    const result = new Float32Array(seg.length);
+    const offsetInExt = start - extStart;
+    
+    for(let x = 0; x < W; x++) {
+      if(spp > 2) {
+        // For downsampled data, average the processed extended samples
+        const s0 = Math.floor(x * spp);
+        const s1 = Math.floor((x + 1) * spp) - 1;
+        const span = Math.max(0, s1 - s0);
+        let acc = 0;
+        acc += extResult[offsetInExt + s0 + Math.floor(0.2 * span)] || 0;
+        acc += extResult[offsetInExt + s0 + Math.floor(0.5 * span)] || 0;
+        acc += extResult[offsetInExt + s0 + Math.floor(0.8 * span)] || 0;
+        result[x] = acc / 3;
+      } else {
+        const s = Math.floor(x * spp);
+        result[x] = extResult[offsetInExt + s] || 0;
+      }
+    }
+    
+    return result;
   }
   const tmp=Array.from(seg).sort((a,b)=>a-b);
   const med=tmp.length%2? tmp[(tmp.length-1)>>1] : 0.5*(tmp[tmp.length/2-1]+tmp[tmp.length/2]);
   for(let i=0;i<seg.length;i++) seg[i]-=med;
   return seg;
 }
-function windowRawSegMulti(leads){
-  const fs=state.fs|0; const start=Math.max(0,state.viewStart|0); const nSamp=Math.max(1,Math.round(state.winSecs*fs)); const a=new Float32Array(nSamp); const L=leads.length;
-  for(let i=0;i<nSamp;i++){ if(L===1){ a[i]=sampleMV(leads[0],start+i); } else { const vals=new Array(L); for(let j=0;j<L;j++) vals[j]=sampleMV(leads[j],start+i); vals.sort((x,y)=>x-y); const mid=L>>1; a[i]=(L%2? vals[mid] : 0.5*(vals[mid-1]+vals[mid])); } }
+function windowRawSegMulti(leads, customStart, customDuration){
+  const fs=state.fs|0; 
+  const start=Math.max(0, customStart != null ? customStart : state.viewStart|0); 
+  const durSecs = customDuration != null ? customDuration : state.winSecs;
+  const nSamp=Math.max(1,Math.round(durSecs*fs)); 
+  const L=leads.length;
+  
+  // Extend the window for better baseline calculation
+  const extendSamp = Math.round(1.0 * fs); // 1 second extension
+  const extStart = Math.max(0, start - extendSamp);
+  const extEnd = Math.min(state.totalSamples - 1, start + nSamp + extendSamp);
+  const extLength = extEnd - extStart + 1;
+  const extA = new Float32Array(extLength);
+  
+  // Populate extended array
+  for(let i=0;i<extLength;i++){ 
+    const sampleIdx = extStart + i;
+    if(L===1){ extA[i]=sampleMV(leads[0],sampleIdx); } 
+    else { 
+      const vals=new Array(L); 
+      for(let j=0;j<L;j++) vals[j]=sampleMV(leads[j],sampleIdx); 
+      vals.sort((x,y)=>x-y); 
+      const mid=L>>1; 
+      extA[i]=(L%2? vals[mid] : 0.5*(vals[mid-1]+vals[mid])); 
+    } 
+  }
+  
+  const a=new Float32Array(nSamp);
   if(state.baselineMode==='hp'){
-    let prev;
-    if(start>0){
-      if(L===1){ prev=sampleMV(leads[0], start-1); }
-      else{
-        const vals=new Array(L); for(let j=0;j<L;j++) vals[j]=sampleMV(leads[j], start-1); vals.sort((x,y)=>x-y); const mid=L>>1; prev=L%2?vals[mid]:0.5*(vals[mid-1]+vals[mid]);
+    // Use extended data for baseline calculation
+    const dtSample = 1 / Math.max(1, fs);
+    const windowSize = Math.min(extLength, Math.max(10, Math.round(0.5 / dtSample))); // ~0.5 second window
+    const extResult = new Float32Array(extLength);
+    
+    // Calculate baseline removal on extended data
+    for(let i = 0; i < extLength; i++) {
+      let sum = 0;
+      let count = 0;
+      const winStart = Math.max(0, i - windowSize);
+      const winEnd = Math.min(extLength - 1, i + windowSize);
+      
+      for(let j = winStart; j <= winEnd; j++) {
+        sum += extA[j];
+        count++;
       }
-    } else prev=a[0];
-    const hp=highpassIIR(a, 1/Math.max(1,fs), 0.5, prev);
-    const off=a[0]-hp[0];
-    for(let i=0;i<hp.length;i++) hp[i]+=off;
-    return hp;
+      
+      const localBaseline = sum / count;
+      extResult[i] = extA[i] - localBaseline;
+    }
+    
+    // Extract the visible portion
+    const offsetInExt = start - extStart;
+    for(let i = 0; i < nSamp; i++) {
+      a[i] = extResult[offsetInExt + i] || 0;
+    }
+    
+    return a;
+  }
+  
+  // For non-hp mode, extract visible portion from extended data
+  const offsetInExt = start - extStart;
+  for(let i = 0; i < nSamp; i++) {
+    a[i] = extA[offsetInExt + i] || 0;
   }
   const tmp=Array.from(a).sort((u,v)=>u-v); const med=tmp.length%2? tmp[(tmp.length-1)>>1] : 0.5*(tmp[tmp.length/2-1]+tmp[tmp.length/2]); for(let i=0;i<a.length;i++) a[i]-=med; return a;
 }
@@ -127,6 +271,123 @@ function getVisibleLeads(){ const v=[]; for(let i=0;i<Math.min(3,state.leadCount
 function getOverviewRange(){ const pts=state.overview.pts||[]; let minB=Infinity,maxB=-Infinity; for(const p of pts){ if(!isFinite(p?.bpm)) continue; if(p.bpm<minB) minB=p.bpm; if(p.bpm>maxB) maxB=p.bpm; } if(!isFinite(minB)||!isFinite(maxB)){ minB=60; maxB=180; } const pad=10; minB=Math.max(30,Math.floor((minB-pad)/10)*10); maxB=Math.min(230,Math.ceil((maxB+pad)/10)*10); if(maxB-minB<40){ const mid=(maxB+minB)/2; minB=Math.max(30,mid-30); maxB=Math.min(230,mid+30); } return {minB,maxB}; }
 function getHRScale(windowRes){ if(state.hrLockScale && state.overview && state.overview.range) return state.overview.range; let minB=60,maxB=180; if(windowRes&&windowRes.pts&&windowRes.pts.length){ minB=Math.min(...windowRes.pts.map(p=>p.bpm)); maxB=Math.max(...windowRes.pts.map(p=>p.bpm)); const pad=10; minB=Math.max(30,Math.floor((minB-pad)/10)*10); maxB=Math.min(230,Math.ceil((maxB+pad)/10)*10); if(maxB-minB<40){ const mid=(maxB+minB)/2; minB=Math.max(30,mid-30); maxB=Math.min(230,mid+30); } } return {minB,maxB}; }
 
+function drawHRRow(ctx, cs, rowIndex, totalRows, rowWinSecs, hrPaneY, hrH, W) {
+  // Use overview HR data (calculated for whole file)
+  const overviewPts = state.overview.pts || [];
+  if (!overviewPts.length) return;
+  
+  // Calculate time range for this row
+  const currentViewStartSec = state.viewStart / state.fs;
+  const rowStartTime = currentViewStartSec + (rowIndex * rowWinSecs);
+  const rowEndTime = rowStartTime + rowWinSecs;
+  
+  // Use overview range for consistent scaling
+  const range = state.overview.range || getOverviewRange();
+  const {minB, maxB} = range;
+  
+  // Draw HR pane background
+  ctx.fillStyle = cs.getPropertyValue('--panel');
+  ctx.fillRect(0, hrPaneY, W, hrH);
+  
+  // Draw top border
+  ctx.strokeStyle = cs.getPropertyValue('--grid-strong');
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, hrPaneY);
+  ctx.lineTo(W, hrPaneY);
+  ctx.stroke();
+  
+  // Draw HR grid (sparse for small heights)
+  const gridStep = hrH < 40 ? 40 : 20;
+  for(let b = Math.ceil(minB / gridStep) * gridStep; b <= maxB; b += gridStep){
+    const y = hrPaneY + hrH - (b - minB) / (maxB - minB) * hrH;
+    ctx.strokeStyle = cs.getPropertyValue('--grid-weak');
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(W, y);
+    ctx.stroke();
+    
+    // Show labels only on first row
+    if(rowIndex === 0 && hrH > 30){
+      ctx.fillStyle = cs.getPropertyValue('--muted');
+      ctx.font = '9px system-ui,sans-serif';
+      ctx.fillText(String(b), 2, y - 1);
+    }
+  }
+  
+  // Helper function to interpolate HR at a specific time
+  function getHRAtTime(targetTime) {
+    if (!overviewPts.length) return null;
+    
+    // Find the closest points before and after targetTime
+    let beforePt = null, afterPt = null;
+    
+    for(let i = 0; i < overviewPts.length; i++) {
+      if (overviewPts[i].t <= targetTime) {
+        beforePt = overviewPts[i];
+      }
+      if (overviewPts[i].t >= targetTime && !afterPt) {
+        afterPt = overviewPts[i];
+        break;
+      }
+    }
+    
+    // Use exact match if available
+    if (beforePt && beforePt.t === targetTime) return beforePt.bpm;
+    if (afterPt && afterPt.t === targetTime) return afterPt.bpm;
+    
+    // Interpolate between points
+    if (beforePt && afterPt && beforePt.t !== afterPt.t) {
+      const ratio = (targetTime - beforePt.t) / (afterPt.t - beforePt.t);
+      return beforePt.bpm + ratio * (afterPt.bpm - beforePt.bpm);
+    }
+    
+    // Extrapolate from single point
+    if (beforePt) return beforePt.bpm;
+    if (afterPt) return afterPt.bpm;
+    
+    return null;
+  }
+  
+  // Draw HR trace spanning full width
+  ctx.strokeStyle = cs.getPropertyValue('--hr') || '#34d399';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  
+  // Sample HR values across the full width of the row
+  const sampleCount = Math.max(50, W / 4); // Good resolution for smooth curve
+  let firstPoint = true;
+  
+  for(let i = 0; i <= sampleCount; i++) {
+    const t = rowStartTime + (i / sampleCount) * rowWinSecs;
+    const hr = getHRAtTime(t);
+    
+    if(hr !== null) {
+      const x = (i / sampleCount) * W;
+      const y = hrPaneY + hrH - (hr - minB) / (maxB - minB) * hrH;
+      
+      if(firstPoint) {
+        ctx.moveTo(x, y);
+        firstPoint = false;
+      } else {
+        ctx.lineTo(x, y);
+      }
+    }
+  }
+  
+  if(!firstPoint) {
+    ctx.stroke();
+  }
+  
+  // Show "HR" label on last row
+  if(rowIndex === totalRows - 1 && hrH > 25){
+    ctx.fillStyle = cs.getPropertyValue('--muted');
+    ctx.font = '10px system-ui,sans-serif';
+    ctx.fillText('HR', W - 20, hrPaneY + 12);
+  }
+}
+
 function drawPaperGrid(ctx,y0,h,laneH,pxPerSec,gainPx,t0Sec,tSpanSec){
   const t0=t0Sec; const t1=t0Sec+tSpanSec; const smallT=0.04;
   const cs=getComputedStyle(document.body);
@@ -141,12 +402,24 @@ function draw(){
   const cs=getComputedStyle(document.body);
   ctx.clearRect(0,0,W,H); ctx.fillStyle=cs.getPropertyValue('--bg')||'#0b1021'; ctx.fillRect(0,0,W,H);
   if(!hasData()){ ctx.fillStyle='#94a3b8'; ctx.fillText('Open sample or load an ECG…',12,18); return; }
-  const hrPane=state.showHR?Math.round(H*0.18):0; const mainH=H-hrPane; const vis=getVisibleLeads(); const shown=vis.length;
+  const vis=getVisibleLeads(); const shown=vis.length;
   let rows=1;
   let rowWinSecs=state.winSecs;
   let pxPerSec=W/Math.max(0.2,rowWinSecs);
   while(pxPerSec<80 && rows<3){ rows++; rowWinSecs=state.winSecs/rows; pxPerSec=W/rowWinSecs; }
-  const laneH=mainH/Math.max(1,shown*rows);
+  
+  // Calculate layout: each row has leads + optional HR
+  const minHRHeight = 30; // Minimum HR height to be useful
+  const hrRowHeight = state.showHR ? Math.max(minHRHeight, Math.round(H * 0.08)) : 0; // HR height per row
+  
+  // Calculate space allocation
+  const totalAvailableHeight = H;
+  const totalHRSpace = state.showHR ? rows * hrRowHeight : 0;
+  const totalECGSpace = totalAvailableHeight - totalHRSpace;
+  const totalRowHeight = totalECGSpace / rows + hrRowHeight;
+  const laneH = totalECGSpace / (rows * shown);
+  
+  const mainH = H; // Keep mainH for compatibility with other parts of the code
   const segs=Array.from({length:rows},()=>new Array(shown));
   const amps=new Array(shown).fill(0);
   for(let r=0;r<rows;r++){
@@ -167,11 +440,14 @@ function draw(){
   const gainsPlot=gains;
   const leadNames=['V1','V3','V5'];
   for(let r=0;r<rows;r++){
-    const rowY=r*shown*laneH;
-    const startSec=state.viewStart/state.fs + r*rowWinSecs;
-    drawPaperGrid(ctx,rowY,shown*laneH,laneH,pxPerSec,gainPx,startSec,rowWinSecs);
+    const rowY = r * totalRowHeight;
+    const startSec = state.viewStart/state.fs + r*rowWinSecs;
+    
+    // Draw ECG leads for this row
+    drawPaperGrid(ctx, rowY, shown*laneH, laneH, pxPerSec, gainPx, startSec, rowWinSecs);
+    
     for(let k=0;k<shown;k++){
-      const baseY=(r*shown + k + 0.5)*laneH;
+      const baseY = rowY + (k + 0.5) * laneH;
       const seg=segs[r][k]; const gain=gainsPlot[k];
       ctx.strokeStyle=cs.getPropertyValue('--trace')||'#a5b4fc'; ctx.lineWidth=1.2; ctx.beginPath();
       for(let x=0;x<W;x++){ const y=baseY - seg[x]*gain; if(x===0) ctx.moveTo(0,y); else ctx.lineTo(x,y); }
@@ -181,23 +457,64 @@ function draw(){
       ctx.fillStyle=cs.getPropertyValue('--muted')||'#94a3b8'; ctx.font='12px system-ui,sans-serif';
       ctx.fillText(leadNames[vis[k]]||('Lead '+(vis[k]+1)), 10, y0 - laneH*0.35);
     }
+    
+    // Draw HR trace under this row's ECG leads
+    if(state.showHR && hrRowHeight > 0) {
+      const hrPaneY = rowY + shown * laneH;
+      drawHRRow(ctx, cs, r, rows, rowWinSecs, hrPaneY, hrRowHeight, W);
+    }
   }
   if(state.showScaleBar){ const barLen=pxPerSec; const barX=Math.max(8,W-barLen-12); const barY=Math.max(20,mainH-16); ctx.strokeStyle=cs.getPropertyValue('--ink')||'#e5e7eb'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(barX,barY); ctx.lineTo(barX+barLen,barY); ctx.stroke(); for(let k=0;k<=5;k++){ const x=barX+k*(barLen/5), len=(k%5===0)?10:6; ctx.beginPath(); ctx.moveTo(x,barY); ctx.lineTo(x,barY+len); ctx.stroke(); } ctx.fillStyle=cs.getPropertyValue('--muted')||'#94a3b8'; ctx.fillText('1 s', barX+barLen/2-10, barY-4); }
   if(state.caliper && state.caliper.a!=null && state.caliper.b!=null){
     const t0=state.viewStart/state.fs;
     const a=Math.min(state.caliper.a,state.caliper.b), b=Math.max(state.caliper.a,state.caliper.b);
-    const span=rowWinSecs;
-    const xA=((a-t0)%span)*pxPerSec;
-    const xB=((b-t0)%span)*pxPerSec;
     const dt=b-a; const bpm=dt>0?60/dt:NaN;
+    
     ctx.strokeStyle='#22d3ee'; ctx.setLineDash([4,3]);
-    ctx.beginPath(); ctx.moveTo(xA,0); ctx.lineTo(xA,mainH); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(xB,0); ctx.lineTo(xB,mainH); ctx.stroke();
+    
+    // Draw caliper lines on all relevant rows
+    for(let r = 0; r < rows; r++) {
+      const rowStartTime = t0 + r * rowWinSecs;
+      const rowEndTime = rowStartTime + rowWinSecs;
+      const rowY = r * totalRowHeight;
+      const ecgRowHeight = shown * laneH; // Height of ECG portion of this row
+      
+      // Check if either caliper point falls within this row's time range
+      if((a >= rowStartTime && a < rowEndTime) || (b >= rowStartTime && b < rowEndTime)) {
+        
+        // Calculate x positions for this row
+        let xA = null, xB = null;
+        
+        if(a >= rowStartTime && a < rowEndTime) {
+          xA = ((a - rowStartTime) / rowWinSecs) * W;
+        }
+        if(b >= rowStartTime && b < rowEndTime) {
+          xB = ((b - rowStartTime) / rowWinSecs) * W;
+        }
+        
+        // Draw vertical lines
+        if(xA !== null) {
+          ctx.beginPath();
+          ctx.moveTo(xA, rowY);
+          ctx.lineTo(xA, rowY + ecgRowHeight);
+          ctx.stroke();
+        }
+        if(xB !== null) {
+          ctx.beginPath();
+          ctx.moveTo(xB, rowY);
+          ctx.lineTo(xB, rowY + ecgRowHeight);
+          ctx.stroke();
+        }
+      }
+    }
+    
     ctx.setLineDash([]);
+    
+    // Show measurement text once at the top
     const text=`Δt ${(dt*1000).toFixed(0)} ms • ≈${isFinite(bpm)?bpm.toFixed(1):'—'} bpm`;
     ctx.font='12px system-ui,sans-serif'; const pad=6;
     const tw=ctx.measureText(text).width+pad*2;
-    const bx=Math.min(W-tw-8, Math.max(8,((xA+xB)/2) - tw/2));
+    const bx=Math.min(W-tw-8, Math.max(8, W/2 - tw/2));
     const by=8;
     ctx.fillStyle=cs.getPropertyValue('--overlay-fill');
     ctx.strokeStyle=cs.getPropertyValue('--overlay-stroke');
@@ -205,7 +522,7 @@ function draw(){
     ctx.fillStyle=cs.getPropertyValue('--overlay-text'); ctx.fillText(text, bx+pad, by+13);
   }
   if(state.caliperV && state.caliperV.yA!=null && state.caliperV.yB!=null){ const li=Math.max(0, Math.min(shown-1, state.caliperV.lead|0)); const idx=Math.floor(state.caliperV.yA/Math.max(1,laneH)); const row=Math.floor(idx/shown); const baseY=(row*shown + li + 0.5)*laneH; const gain=gainsPlot[li]||1; const yA=state.caliperV.yA,yB=state.caliperV.yB; const dv=(yA-yB)/gain; const vtxt=`ΔV ${dv.toFixed(2)} mV (${leadNames[vis[li]]||('Lead '+(vis[li]+1))})`; const pad=6; const vw=ctx.measureText(vtxt).width+pad*2; const vx=12; const vy=Math.max(16, baseY - laneH*0.35); ctx.strokeStyle='#22d3ee'; ctx.setLineDash([4,3]); ctx.beginPath(); ctx.moveTo(0,yA); ctx.lineTo(W,yA); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0,yB); ctx.lineTo(W,yB); ctx.stroke(); ctx.setLineDash([]); ctx.fillStyle=cs.getPropertyValue('--overlay-fill'); ctx.strokeStyle=cs.getPropertyValue('--overlay-stroke'); ctx.lineWidth=1; ctx.fillRect(vx,vy,vw,18); ctx.strokeRect(vx,vy,vw,18); ctx.fillStyle=cs.getPropertyValue('--overlay-text'); ctx.fillText(vtxt, vx+pad, vy+13); }
-  const hrPane2 = state.showHR?Math.round(H*0.18):0; if(hrPane2>0){ const paneY=mainH; const h=hrPane2; const leads=getVisibleLeads(); const segHR=windowRawSegMulti(leads); const dt=1/Math.max(1,state.fs); const res=detectHR(segHR, dt, state.hrSmooth, state.robustHR, state.hrTol); let {minB,maxB}=getHRScale(res); ctx.fillStyle=cs.getPropertyValue('--panel'); ctx.fillRect(0,paneY,W,h); ctx.strokeStyle=cs.getPropertyValue('--grid-strong'); ctx.beginPath(); ctx.moveTo(0,paneY); ctx.lineTo(W,paneY); ctx.stroke(); for(let b=Math.ceil(minB/20)*20; b<=maxB; b+=20){ const y=paneY+h - (b-minB)/(maxB-minB)*h; ctx.strokeStyle=cs.getPropertyValue('--grid-weak'); ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); ctx.fillStyle=cs.getPropertyValue('--muted'); ctx.font='11px system-ui,sans-serif'; ctx.fillText(String(b)+' bpm', 6, y-2); } if(res.pts.length){ const firstY=paneY+h - (res.pts[0].bpm-minB)/(maxB-minB)*h; const lastY=paneY+h - (res.pts[res.pts.length-1].bpm-minB)/(maxB-minB)*h; ctx.strokeStyle=cs.getPropertyValue('--hr')||'#34d399'; ctx.lineWidth=1.8; ctx.beginPath(); ctx.moveTo(0,firstY); for(let i=0;i<res.pts.length;i++){ const x=(res.pts[i].t/state.winSecs)*W; const y=paneY+h - (res.pts[i].bpm-minB)/(maxB-minB)*h; ctx.lineTo(x,y); } ctx.lineTo(W,lastY); ctx.stroke(); const avg=res.avg; ctx.fillStyle=cs.getPropertyValue('--muted'); ctx.font='12px system-ui,sans-serif'; ctx.fillText('HR '+(isFinite(avg)?avg.toFixed(0)+' bpm':'—'), W-90, paneY+14); } }
+
 }
 function drawOverview(){ const ctx=els.overview.getContext('2d'); const dpr=state.dpr; ctx.setTransform(dpr,0,0,dpr,0,0); const W=els.overview.clientWidth||600,H=els.overview.clientHeight||80; const cs=getComputedStyle(document.body); ctx.clearRect(0,0,W,H); ctx.fillStyle=cs.getPropertyValue('--panel'); ctx.fillRect(0,0,W,H); if(!hasData()){ ctx.fillStyle=cs.getPropertyValue('--muted'); ctx.fillText('Load a file to build HR overview…',12,16); return; } const totalSec=state.totalSamples/state.fs; const T0=Math.max(0,state.overview.ovStartSec||0); const Tspan=Math.max(1e-6,state.overview.ovSpanSec||totalSec); const Tend=Math.min(totalSec,T0+Tspan); const pts=state.overview.pts||[]; if(!pts.length){ ctx.fillStyle=cs.getPropertyValue('--muted'); const msg=state.overview.building?('Building HR overview… '+Math.round((state.overview.progress||0)*100)+'%'):'HR overview not built'; ctx.fillText(msg,12,16); } else { const range=state.overview.range||getOverviewRange(); const minB=range.minB,maxB=range.maxB; for(let b=Math.ceil(minB/20)*20; b<=maxB; b+=20){ const y=H - (b-minB)/(maxB-minB)*H; ctx.strokeStyle=cs.getPropertyValue('--grid-weak'); ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); ctx.fillStyle=cs.getPropertyValue('--muted'); ctx.font='10px system-ui,sans-serif'; ctx.fillText(b+' bpm',4,y-2); } ctx.strokeStyle=cs.getPropertyValue('--hr-ov')||'#93c5fd'; ctx.lineWidth=1.5; ctx.beginPath(); let moved=false; for(const p of pts){ const t=p.t; if(t<T0||t>Tend||!isFinite(p?.bpm)) continue; const x=((t-T0)/Tspan)*W; const y=H - (p.bpm-minB)/(maxB-minB)*H; if(!moved){ ctx.moveTo(x,y); moved=true; } else ctx.lineTo(x,y); } if(moved) ctx.stroke(); } const t0=state.viewStart/state.fs, t1=t0+state.winSecs; const x0=((t0-(state.overview.ovStartSec||0))/Math.max(1e-6,state.overview.ovSpanSec||totalSec))*W; const x1=((t1-(state.overview.ovStartSec||0))/Math.max(1e-6,state.overview.ovSpanSec||totalSec))*W; const rx0=Math.max(0,Math.min(W,x0)), rx1=Math.max(0,Math.min(W,x1)); ctx.fillStyle='rgba(59,130,246,0.15)'; ctx.fillRect(rx0,0,Math.max(3,rx1-rx0),H); ctx.strokeStyle='rgba(59,130,246,0.6)'; ctx.strokeRect(rx0,0,Math.max(3,rx1-rx0),H); }
 function startOverviewBuild(){
@@ -242,8 +559,7 @@ function startOverviewBuild(){
       let segBP;
       if(state.baselineMode==='hp'){
         const hp=highpassIIR(seg,dt,0.5,prev);
-        const off=seg[0]-hp[0];
-        for(let k=0;k<Wp;k++) hp[k]+=off;
+        // Don't force the first sample to match original - let high-pass filter work naturally
         segBP=hp;
       } else {
         const tmp=Array.from(seg).sort((a,b)=>a-b); const med=tmp.length%2? tmp[(tmp.length-1)>>1] : 0.5*(tmp[tmp.length/2-1]+tmp[tmp.length/2]); for(let k=0;k<Wp;k++) seg[k]-=med; segBP=seg;
@@ -268,11 +584,95 @@ els.toolVolt.addEventListener('click',()=>setTool('volt'));
 [els.showL0,els.showL1,els.showL2].forEach((cb,i)=>cb.addEventListener('change',()=>{ state.showLeads[i]=!!cb.checked; draw(); }));
 els.scroll.addEventListener('input',()=>{ const max=maxOverviewStart(); state.overview.ovStartSec=clamp(+els.scroll.value,0,max); syncScroll(); drawOverview(); });
 els.reset.addEventListener('click',()=>{ state.viewStart=0; state.winSecs=clamp(+els.win.value||10,0.2,120); draw(); drawOverview(); });
-els.canvas.addEventListener('wheel', ev=>{ if(!hasData()) return; ev.preventDefault(); const viewS=Math.max(1,Math.round(state.winSecs*state.fs)); const center=state.viewStart+Math.floor(viewS*(ev.offsetX/Math.max(1,state.width))); const factor=ev.deltaY<0?0.9:1.1; state.winSecs=clamp(viewS*factor/state.fs,0.2,120); const newView=Math.max(1,Math.round(state.winSecs*state.fs)); state.viewStart=clamp(center-Math.floor(newView*(ev.offsetX/Math.max(1,state.width))),0,maxViewStart()); updateWinInput(); draw(); drawOverview(); }, {passive:false});
+els.canvas.addEventListener('wheel', ev=>{ if(!hasData()) return; ev.preventDefault(); 
+  // Get the time at mouse cursor position using current layout
+  const mouseTime = xyToTime(ev.offsetX, ev.offsetY);
+  
+  // Calculate zoom factor and new window size
+  const factor = ev.deltaY < 0 ? 0.9 : 1.1;
+  const newWinSecs = clamp(state.winSecs * factor, 0.2, 120);
+  
+  // Temporarily update state to determine new layout
+  const oldWinSecs = state.winSecs;
+  state.winSecs = newWinSecs;
+  
+  // Calculate what the new layout will be
+  const W = state.width;
+  let newRows = 1;
+  let newRowWinSecs = newWinSecs;
+  let newPxPerSec = W / Math.max(0.2, newRowWinSecs);
+  while(newPxPerSec < 80 && newRows < 3) { 
+    newRows++; 
+    newRowWinSecs = newWinSecs / newRows; 
+    newPxPerSec = W / newRowWinSecs; 
+  }
+  
+  // Calculate the new view start to keep the mouse time at the same screen position
+  // We need to figure out which row and x position the mouse time will be in the new layout
+  function timeToXY(targetTime, rows, rowWinSecs) {
+    const viewStartTime = state.viewStart / state.fs;
+    const relativeTime = targetTime - viewStartTime;
+    
+    if (relativeTime < 0 || relativeTime >= newWinSecs) {
+      return null; // Outside visible range
+    }
+    
+    const row = Math.floor(relativeTime / rowWinSecs);
+    const timeInRow = relativeTime - (row * rowWinSecs);
+    const x = (timeInRow / rowWinSecs) * W;
+    
+    // Calculate y position in the new layout
+    const minHRHeight = 30;
+    const hrRowHeight = state.showHR ? Math.max(minHRHeight, Math.round(state.height * 0.08)) : 0;
+    const totalHRSpace = state.showHR ? rows * hrRowHeight : 0;
+    const totalECGSpace = state.height - totalHRSpace;
+    const totalRowHeight = totalECGSpace / rows + hrRowHeight;
+    const y = row * totalRowHeight + totalRowHeight * 0.5; // Middle of the row
+    
+    return { x, y, row };
+  }
+  
+  // Find where we want the mouse time to appear in the new layout
+  const targetXY = timeToXY(mouseTime, newRows, newRowWinSecs);
+  
+  if (targetXY) {
+    // Calculate the time that would be at the mouse position in the new layout
+    const newMouseTime = xyToTimeWithLayout(ev.offsetX, ev.offsetY, newRows, newRowWinSecs);
+    
+    // Adjust view start to make the original mouse time appear at the cursor position
+    const timeDiff = mouseTime - newMouseTime;
+    const newViewStartTime = (state.viewStart / state.fs) + timeDiff;
+    const newViewStartSamples = Math.round(newViewStartTime * state.fs);
+    
+    state.viewStart = clamp(newViewStartSamples, 0, maxViewStart());
+  }
+  
+  updateWinInput(); 
+  draw(); 
+  drawOverview(); 
+}, {passive:false});
+
+// Helper function to calculate time with a specific layout
+function xyToTimeWithLayout(x, y, rows, rowWinSecs) {
+  const t0 = state.viewStart / state.fs;
+  
+  const minHRHeight = 30;
+  const hrRowHeight = state.showHR ? Math.max(minHRHeight, Math.round(state.height * 0.08)) : 0;
+  const totalHRSpace = state.showHR ? rows * hrRowHeight : 0;
+  const totalECGSpace = state.height - totalHRSpace;
+  const totalRowHeight = totalECGSpace / rows + hrRowHeight;
+  
+  const row = Math.floor(y / totalRowHeight);
+  const clampedRow = Math.max(0, Math.min(rows - 1, row));
+  
+  const rowStartTime = t0 + clampedRow * rowWinSecs;
+  const relativeX = x / Math.max(1, state.width);
+  return rowStartTime + relativeX * rowWinSecs;
+}
 let dragging=false, dragStartX=0, dragViewStart=0;
-els.canvas.addEventListener('mousedown', ev=>{ if(!hasData()) return; const H=state.height; const hrPane=state.showHR?Math.round(H*0.18):0; const mainH=H-hrPane; const vis=getVisibleLeads(); const shown=vis.length; const pxPerSec=state.width/Math.max(0.2,state.winSecs); let rows=1; if(pxPerSec<80) rows=2; if(pxPerSec<30) rows=3; const laneH=mainH/Math.max(1,shown*rows); if(ev.shiftKey || state.tool==='time'){ state.caliper={a:xToTime(ev.offsetX), b:null, active:true}; draw(); return; } if(ev.ctrlKey || state.tool==='volt'){ const idx=Math.floor(ev.offsetY/Math.max(1,laneH)); const li=Math.max(0, Math.min(shown-1, idx%shown)); state.caliperV={lead:li, yA:ev.offsetY, yB:null, active:true}; draw(); return; } dragging=true; dragStartX=ev.clientX; dragViewStart=state.viewStart; });
+els.canvas.addEventListener('mousedown', ev=>{ if(!hasData()) return; const H=state.height; const hrPane=state.showHR?Math.round(H*0.18):0; const mainH=H-hrPane; const vis=getVisibleLeads(); const shown=vis.length; const pxPerSec=state.width/Math.max(0.2,state.winSecs); let rows=1; if(pxPerSec<80) rows=2; if(pxPerSec<30) rows=3; const laneH=mainH/Math.max(1,shown*rows); if(ev.shiftKey || state.tool==='time'){ state.caliper={a:xyToTime(ev.offsetX, ev.offsetY), b:null, active:true}; draw(); return; } if(ev.ctrlKey || state.tool==='volt'){ const idx=Math.floor(ev.offsetY/Math.max(1,laneH)); const li=Math.max(0, Math.min(shown-1, idx%shown)); state.caliperV={lead:li, yA:ev.offsetY, yB:null, active:true}; draw(); return; } dragging=true; dragStartX=ev.clientX; dragViewStart=state.viewStart; });
 window.addEventListener('mouseup', ()=>{ if(state.caliper.active) state.caliper.active=false; if(state.caliperV.active) state.caliperV.active=false; dragging=false; });
-window.addEventListener('mousemove', ev=>{ if(!hasData()) return; const rect=els.canvas.getBoundingClientRect(); const x=ev.clientX-rect.left; const y=ev.clientY-rect.top; if(state.caliper.active){ state.caliper.b=xToTime(x); draw(); return; } if(state.caliperV.active){ state.caliperV.yB=y; draw(); return; } if(!dragging) return; const dx=ev.clientX-dragStartX; const spp=(state.winSecs*state.fs)/Math.max(1,state.width); state.viewStart=clamp(dragViewStart-Math.round(dx*spp),0,maxViewStart()); draw(); drawOverview(); });
+window.addEventListener('mousemove', ev=>{ if(!hasData()) return; const rect=els.canvas.getBoundingClientRect(); const x=ev.clientX-rect.left; const y=ev.clientY-rect.top; if(state.caliper.active){ state.caliper.b=xyToTime(x, y); draw(); return; } if(state.caliperV.active){ state.caliperV.yB=y; draw(); return; } if(!dragging) return; const dx=ev.clientX-dragStartX; const spp=(state.winSecs*state.fs)/Math.max(1,state.width); state.viewStart=clamp(dragViewStart-Math.round(dx*spp),0,maxViewStart()); draw(); drawOverview(); });
 let ovDragging=false; function setViewFromOverviewEvent(e){ const rect=els.overview.getBoundingClientRect(); const x=e.clientX-rect.left; const W=rect.width; const totalSec=state.totalSamples/state.fs; const T0=Math.max(0,state.overview.ovStartSec||0); const Tspan=Math.max(1e-6,state.overview.ovSpanSec||totalSec); const clickSec=T0+(x/Math.max(1,W))*Tspan; const newStart=Math.max(0,Math.round(clickSec*state.fs)); state.viewStart=Math.min(newStart,maxViewStart()); draw(); drawOverview(); }
 els.overview.addEventListener('mousedown',e=>{ if(!hasData()) return; ovDragging=true; setViewFromOverviewEvent(e); });
 window.addEventListener('mouseup',()=>{ ovDragging=false; });
@@ -282,11 +682,11 @@ els.overview.addEventListener('dblclick',()=>{ if(!hasData()) return; const tota
 function parseBinary(buf){ const dv=new DataView(buf); const n16=dv.byteLength>>>1; const i16=new Int16Array(n16); for(let i=0;i<n16;i++) i16[i]=dv.getInt16(i<<1,true); state.raw=i16; state.csv=null; state.leadCount=Math.max(1, +els.leads.value|0); state.totalSamples=Math.floor(i16.length/state.leadCount); }
 function splitLines(s){ return s.split(/\r?\n/); }
 function parseCSV(text){ const rows=splitLines(text).map(line=>line.trim()).filter(Boolean).map(line=>line.split(/[;,\t\s]+/).map(Number)).filter(r=>r.length && r.every(Number.isFinite)); if(!rows.length){ setStatus('CSV parse failed: no numeric rows',true); return; } const L=rows[0].length; const leads=Array.from({length:L},()=>[]); for(const r of rows){ for(let j=0;j<L;j++) leads[j].push(r[j]); } state.csv=leads.map(a=>Float32Array.from(a)); state.raw=null; state.leadCount=L; state.totalSamples=state.csv[0].length; }
-function loadSample(){ const fs=state.fs|0; const dur=10; const n=Math.max(1,fs*dur); function synthLead(phase,scale){ const a=new Float32Array(n); const rr=0.8; const qrsW=0.02; for(let i=0;i<n;i++){ const t=i/fs; let v=0.03*Math.sin(2*Math.PI*0.33*t + (phase||0)); const d=t%rr; const near=d < rr-d ? d : rr-d; const qrs=Math.max(0,(qrsW-near))/qrsW; v+=1.0*qrs; v+=0.12*Math.sin(2*Math.PI*(1/rr)*t + (phase||0)*0.6); a[i]=(scale||1)*v; } return a; } state.csv=[synthLead(0,1.0), synthLead(0.15,0.9), synthLead(0.3,0.8)]; state.raw=null; state.leadCount=3; state.totalSamples=n; state.viewStart=0; const totalSec=n/fs; state.overview.ovStartSec=0; state.overview.ovSpanSec=totalSec; setStatus('Sample loaded: 3 leads, '+n+' samples/lead.'); syncScroll(); draw(); startOverviewBuild(); }
-els.sample.addEventListener('click', loadSample);
+
+
 els.file.addEventListener('change', async e=>{ const f=e.target.files&&e.target.files[0]; if(!f) return; try{ setStatus('Loading \"'+f.name+'\" …'); const buf=await f.arrayBuffer(); const name=(f.name||'').toLowerCase(); if(name.endsWith('.csv')||name.endsWith('.txt')) parseCSV(new TextDecoder().decode(new Uint8Array(buf))); else parseBinary(buf); state.fs=+els.fs.value||200; state.uvPerLSB=+els.uv.value||2; state.viewStart=0; const totalSec=state.totalSamples/state.fs; state.overview.ovStartSec=0; state.overview.ovSpanSec=totalSec; setStatus('Loaded: '+state.leadCount+' lead(s), '+state.totalSamples+' samples/lead. Wheel=zoom, drag=pan. Shift=time caliper, Ctrl=volt caliper.'); syncScroll(); draw(); startOverviewBuild(); }catch(err){ console.error(err); setStatus('Error reading file: '+(err&&err.message||err), true); } });
 function applyTheme(name){
-  document.body.classList.remove('theme-dark','theme-light','theme-ocean','theme-ecg');
+  document.body.classList.remove('theme-dark','theme-light','theme-ocean','theme-ecg','theme-mint','theme-sunset','theme-purple');
   document.body.classList.add('theme-'+name);
   draw();
   drawOverview();

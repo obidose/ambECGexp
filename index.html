@@ -9,45 +9,49 @@
 <body class="theme-dark">
   <header>
     <input id="file" type="file" accept=".ecg,.bin,.csv,.txt,.dat" />
-    <label>Leads <input id="leads" type="number" value="3" min="1" max="12"></label>
-    <label>fs (Hz) <input id="fs" type="number" value="200" min="25" step="1"></label>
-    <label>uV/LSB <input id="uv" type="number" value="2" min="1" step="1"></label>
-    <label>Window (s) <input id="win" type="number" value="10" min="0.2" max="120" step="0.1"></label>
-    <label>Lead height (%) <input id="vfill" type="range" min="30" max="95" value="65"> <span id="vfillVal">65</span></label>
-    <label><input id="autoGain" type="checkbox" checked> Auto-gain</label>
-    <label><input id="showHR" type="checkbox" checked> Show HR</label>
-    <label><input id="hrLock" type="checkbox" checked> Lock HR scale</label>
-    <label>HR smooth <input id="hrSmooth" type="number" value="5" min="1" max="15" step="1"></label>
-    <label><input id="robustHR" type="checkbox" checked> Robust HR</label>
-    <label>Outlier tol (%) <input id="hrTol" type="number" value="30" min="5" max="80" step="5"></label>
-    <label>Baseline
-      <select id="baseline"><option value="none">None</option><option value="hp" selected>High-pass 0.5 Hz</option></select>
-    </label>
-    <span class="btn-group"><span>Tools:</span>
-      <button id="toolPan" class="secondary">Pan</button>
-      <button id="toolTime" class="secondary">Time</button>
-      <button id="toolVolt" class="secondary">Voltage</button>
+    <label>Leads <input id="leads" type="number" value="3" min="1" max="12" style="width:50px"></label>
+    <label>Rate <input id="fs" type="number" value="200" min="25" step="1" style="width:60px"> Hz</label>
+    <label>µV/LSB <input id="uv" type="number" value="2" min="1" step="1" style="width:50px"></label>
+    <label>Win <input id="win" type="number" value="10" min="0.2" max="120" step="0.1" style="width:50px"> s</label>
+    <label>Fill <input id="vfill" type="range" min="30" max="95" value="65" style="width:60px"> <span id="vfillVal">65</span>%</label>
+    <label><input id="autoGain" type="checkbox" checked> Auto</label>
+    <span class="sep">•</span>
+    <label><input id="showHR" type="checkbox" checked> HR</label>
+    <label><input id="hrLock" type="checkbox" checked> Lock</label>
+    <label>Smooth <input id="hrSmooth" type="number" value="5" min="1" max="15" step="1" style="width:40px"></label>
+    <label><input id="robustHR" type="checkbox" checked> Robust</label>
+    <label>Tol <input id="hrTol" type="number" value="30" min="5" max="80" step="5" style="width:45px">%</label>
+    <label>Baseline <select id="baseline" style="width:80px"><option value="none">None</option><option value="hp" selected>0.5Hz</option></select></label>
+    <span class="sep">•</span>
+    <span class="btn-group">
+      <button id="toolPan" class="tool-btn active">Pan</button>
+      <button id="toolTime" class="tool-btn">Time</button>
+      <button id="toolVolt" class="tool-btn">Volt</button>
     </span>
-    <label><input id="showScale" type="checkbox" checked> 1s scale bar</label>
-    <span>Show
+    <label><input id="showScale" type="checkbox" checked> Scale</label>
+    <span class="lead-group">
       <label><input id="showL0" type="checkbox" checked>V1</label>
       <label><input id="showL1" type="checkbox" checked>V3</label>
       <label><input id="showL2" type="checkbox" checked>V5</label>
     </span>
-    <span class="sp"></span>
-    <label>Theme
-      <select id="theme"><option value="dark" selected>Dark</option><option value="light">Light</option><option value="ocean">Ocean</option><option value="ecg">ECG paper</option></select>
-    </label>
-    <button id="sample" class="secondary">Open sample</button>
-    <button id="reset" class="secondary">Reset view</button>
-    <button id="print" class="secondary">Print</button>
+    <select id="theme" class="theme-select">
+      <option value="dark" selected>Dark</option>
+      <option value="light">Light</option>
+      <option value="ocean">Ocean</option>
+      <option value="ecg">ECG</option>
+      <option value="mint">Mint</option>
+      <option value="sunset">Sunset</option>
+      <option value="purple">Purple</option>
+    </select>
+    <button id="reset" class="action-btn">Reset</button>
+    <button id="print" class="action-btn">Print</button>
   </header>
   <canvas id="ecg"></canvas>
   <canvas id="overview"></canvas>
   <div id="scrollWrap">
     <input id="scroll" type="range" min="0" value="0" step="1" style="width:100%">
   </div>
-  <div id="status" class="status">Ready. Click Open sample, or load your .ecg (fs=200, uV/LSB=2).</div>
+  <div id="status" class="status">Ready. Load your .ecg file (fs=200, uV/LSB=2) or .csv data.</div>
   <script src="script.js"></script>
 </body>
 </html>

@@ -7,19 +7,23 @@
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font:14px system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
-header{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;padding:10px 16px;background:var(--panel);border-bottom:1px solid #1f2937;box-shadow:0 2px 4px rgba(0,0,0,0.2)}
-label{display:flex;align-items:center;gap:6px}
+header{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;padding:8px 16px;background:var(--panel);border-bottom:1px solid #1f2937;box-shadow:0 2px 4px rgba(0,0,0,0.2);min-height:44px}
+label{display:flex;align-items:center;gap:4px;font-size:13px}
 input[type="number"]{width:84px}
-input,select{background:var(--panel);color:var(--ink);border:1px solid #334155;border-radius:6px;padding:4px 6px}
-button{background:#0ea5e9;border:0;color:#041017;padding:6px 10px;border-radius:8px;font-weight:600;cursor:pointer;transition:background .15s,transform .05s}
-button:hover{filter:brightness(1.1)}
-button:active{transform:scale(0.96)}
-button.secondary{background:#1f2937;color:#e5e7eb;border:1px solid #334155}
-button.secondary:hover{background:#374151}
-button.secondary:active{background:#4b5563}
-.btn-group{display:flex;align-items:center;gap:6px}
-.btn-group span{margin-right:4px}
-.btn-group button.active{background:var(--accent);color:#041017}
+input,select{background:var(--panel);color:var(--ink);border:1px solid #334155;border-radius:4px;padding:3px 6px;font-size:13px}
+input[type="file"]{background:var(--accent);color:white;border:1px solid var(--accent);border-radius:6px;padding:4px 8px;font-weight:500;cursor:pointer}
+input[type="checkbox"]{margin:0;accent-color:var(--accent)}
+input[type="range"]{margin:0}
+.sep{color:var(--muted);margin:0 6px;font-size:16px}
+.btn-group{display:flex;align-items:center;gap:2px;background:var(--bg);padding:2px;border-radius:6px;border:1px solid #334155}
+.tool-btn{background:transparent;border:0;color:var(--muted);padding:4px 8px;border-radius:4px;font-size:12px;font-weight:500;cursor:pointer;transition:all .15s}
+.tool-btn:hover{background:var(--panel);color:var(--ink)}
+.tool-btn.active{background:var(--accent);color:white}
+.lead-group{display:flex;gap:8px}
+.theme-select{min-width:70px;font-size:12px}
+.action-btn{background:var(--accent);border:0;color:white;padding:4px 10px;border-radius:4px;font-size:12px;font-weight:500;cursor:pointer;transition:all .15s}
+.action-btn:hover{filter:brightness(1.1)}
+.action-btn:active{transform:scale(0.96)}
 canvas{display:block;width:100%}
 #ecg{height:68vh;background:var(--bg)}
 #overview{height:90px;background:var(--panel);border-top:2px solid var(--accent);border-bottom:1px solid #1f2937;margin-top:6px}
@@ -49,4 +53,25 @@ canvas{display:block;width:100%}
   --trace:#000;--hr:#f43f5e;--hr-ov:#f43f5e;--accent:#f97316;
   --overlay-fill:rgba(255,255,255,0.92);--overlay-stroke:#111827;--overlay-text:#0b0b0b;
 }
+.theme-mint{
+  --bg:#0f1e17;--panel:#16252d;--ink:#d1fae5;--muted:#6ee7b7;
+  --grid-weak:rgba(110,231,183,0.18);--grid-strong:rgba(110,231,183,0.45);
+  --trace:#34d399;--hr:#fbbf24;--hr-ov:#6ee7b7;--accent:#10b981;
+  --overlay-fill:rgba(15,30,23,0.9);--overlay-stroke:#047857;--overlay-text:#d1fae5;
+}
+.theme-sunset{
+  --bg:#1f1611;--panel:#2d1b16;--ink:#fed7aa;--muted:#fb923c;
+  --grid-weak:rgba(251,146,60,0.18);--grid-strong:rgba(251,146,60,0.45);
+  --trace:#f97316;--hr:#ef4444;--hr-ov:#fb923c;--accent:#ea580c;
+  --overlay-fill:rgba(31,22,17,0.9);--overlay-stroke:#c2410c;--overlay-text:#fed7aa;
+}
+.theme-purple{
+  --bg:#1e1b2e;--panel:#2a2438;--ink:#e9d5ff;--muted:#c084fc;
+  --grid-weak:rgba(192,132,252,0.18);--grid-strong:rgba(192,132,252,0.45);
+  --trace:#a855f7;--hr:#06d6a0;--hr-ov:#c084fc;--accent:#9333ea;
+  --overlay-fill:rgba(30,27,46,0.9);--overlay-stroke:#7c3aed;--overlay-text:#e9d5ff;
+}
 body.theme-ecg input,body.theme-ecg select{background:#fff;border:1px solid #cbd5e1;color:#0b0b0b}
+body.theme-mint input,body.theme-mint select{background:#16252d;border:1px solid #047857;color:#d1fae5}
+body.theme-sunset input,body.theme-sunset select{background:#2d1b16;border:1px solid #c2410c;color:#fed7aa}
+body.theme-purple input,body.theme-purple select{background:#2a2438;border:1px solid #7c3aed;color:#e9d5ff}
