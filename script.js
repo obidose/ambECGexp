@@ -10,7 +10,7 @@ const els = {
   canvas:document.getElementById('ecg'), overview:document.getElementById('overview'), status:document.getElementById('status'), scroll:document.getElementById('scroll')
 };
 const state = {
-  fs:200, uvPerLSB:2, leadCount:3, winSecs:10, vfill:0.65,
+  fs:200, uvPerLSB:1, leadCount:3, winSecs:10, vfill:0.65,
   autoGain:true,
   showHR:true, hrLockScale:true, hrSmooth:5, robustHR:true, hrTol:30,
   baselineMode:'hp', showScaleBar:true, showLeads:[true,true,true],
@@ -780,7 +780,7 @@ function splitLines(s){ return s.split(/\r?\n/); }
 function parseCSV(text){ const rows=splitLines(text).map(line=>line.trim()).filter(Boolean).map(line=>line.split(/[;,\t\s]+/).map(Number)).filter(r=>r.length && r.every(Number.isFinite)); if(!rows.length){ setStatus('CSV parse failed: no numeric rows',true); return; } const L=rows[0].length; const leads=Array.from({length:L},()=>[]); for(const r of rows){ for(let j=0;j<L;j++) leads[j].push(r[j]); } state.csv=leads.map(a=>Float32Array.from(a)); state.raw=null; state.leadCount=L; state.totalSamples=state.csv[0].length; }
 
 
-els.file.addEventListener('change', async e=>{ const f=e.target.files&&e.target.files[0]; if(!f) return; try{ setStatus('Loading \"'+f.name+'\" …'); const buf=await f.arrayBuffer(); const name=(f.name||'').toLowerCase(); if(name.endsWith('.csv')||name.endsWith('.txt')) parseCSV(new TextDecoder().decode(new Uint8Array(buf))); else parseBinary(buf); state.fs=+els.fs.value||200; state.uvPerLSB=+els.uv.value||2; state.viewStart=0; const totalSec=state.totalSamples/state.fs; state.overview.ovStartSec=0; state.overview.ovSpanSec=totalSec; setStatus('Loaded: '+state.leadCount+' lead(s), '+state.totalSamples+' samples/lead. Wheel=zoom, drag=pan. Shift=time caliper, Ctrl=volt caliper.'); syncScroll(); draw(); startOverviewBuild(); }catch(err){ console.error(err); setStatus('Error reading file: '+(err&&err.message||err), true); } });
+els.file.addEventListener('change', async e=>{ const f=e.target.files&&e.target.files[0]; if(!f) return; try{ setStatus('Loading \"'+f.name+'\" …'); const buf=await f.arrayBuffer(); const name=(f.name||'').toLowerCase(); if(name.endsWith('.csv')||name.endsWith('.txt')) parseCSV(new TextDecoder().decode(new Uint8Array(buf))); else parseBinary(buf); state.fs=+els.fs.value||200; state.uvPerLSB=+els.uv.value||1; state.viewStart=0; const totalSec=state.totalSamples/state.fs; state.overview.ovStartSec=0; state.overview.ovSpanSec=totalSec; setStatus('Loaded: '+state.leadCount+' lead(s), '+state.totalSamples+' samples/lead. Wheel=zoom, drag=pan. Shift=time caliper, Ctrl=volt caliper.'); syncScroll(); draw(); startOverviewBuild(); }catch(err){ console.error(err); setStatus('Error reading file: '+(err&&err.message||err), true); } });
 function applyTheme(name){
   document.body.classList.remove('theme-dark','theme-light','theme-ocean','theme-ecg','theme-mint','theme-sunset','theme-purple');
   document.body.classList.add('theme-'+name);
@@ -789,7 +789,7 @@ function applyTheme(name){
 }
 els.theme.addEventListener('change', ()=>applyTheme(els.theme.value));
 els.fs.addEventListener('change', ()=>{ state.fs=+els.fs.value||200; syncScroll(); draw(); drawOverview(); });
-els.uv.addEventListener('change', ()=>{ state.uvPerLSB=+els.uv.value||2; draw(); });
+els.uv.addEventListener('change', ()=>{ state.uvPerLSB=+els.uv.value||1; draw(); });
 els.leads.addEventListener('change', ()=>{ state.leadCount=Math.max(1,+els.leads.value|0); if(state.raw){ state.totalSamples=Math.floor(state.raw.length/state.leadCount); } syncScroll(); draw(); drawOverview(); });
 els.win.addEventListener('change', ()=>{ state.winSecs=clamp(+els.win.value||10,0.2,120); updateWinInput(); syncScroll(); draw(); drawOverview(); });
 els.vfill.addEventListener('input', ()=>{ state.vfill=(+els.vfill.value||65)/100; els.vfillVal.textContent=Math.round(state.vfill*100); draw(); });
@@ -832,7 +832,7 @@ function showDevicePropertiesDialog() {
       els.fs.value = document.getElementById('temp-fs').value;
       els.uv.value = document.getElementById('temp-uv').value;
       state.fs = +els.fs.value || 200;
-      state.uvPerLSB = +els.uv.value || 2;
+      state.uvPerLSB = +els.uv.value || 1;
       syncScroll();
       draw();
       drawOverview();
@@ -962,7 +962,7 @@ async function loadDemoFile(filePath) {
     parseBinary(buf);
     
     state.fs = +els.fs.value || 200;
-    state.uvPerLSB = +els.uv.value || 2;
+    state.uvPerLSB = +els.uv.value || 1;
     state.viewStart = 0;
     const totalSec = state.totalSamples / state.fs;
     state.overview.ovStartSec = 0;

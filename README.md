@@ -54,7 +54,7 @@ Load long recordings, pan/zoom smoothly, visualize heart rate, and measure with 
 - **Controls to set**
   - **Leads**: number of channels in the file.
   - **fs (Hz)**: sampling rate (e.g., **200**).
-  - **uV/LSB**: hardware scale (e.g., **2** → each integer step = 2 µV).
+  - **uV/LSB**: hardware scale (e.g., **1** → each integer step = 1 µV).
   - Values are converted to **mV** for plotting and calipers.
 
 ### CSV/TXT
@@ -137,7 +137,7 @@ Load long recordings, pan/zoom smoothly, visualize heart rate, and measure with 
 
 **Nothing draws after loading**  
 - Check **Leads** is correct for your binary file (3 for V1/V3/V5).  
-- Confirm **fs** (e.g., **200 Hz**) and **uV/LSB** (**2**).  
+- Confirm **fs** (e.g., **200 Hz**) and **uV/LSB** (**1**).  
 - If CSV, ensure values are numeric and in **mV**.
 
 **ECG amplitude looks wrong**  
