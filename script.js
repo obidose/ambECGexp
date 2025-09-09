@@ -6,6 +6,7 @@ const els = {
   baseline:document.getElementById('baseline'), toolPan:document.getElementById('toolPan'), toolTime:document.getElementById('toolTime'), toolVolt:document.getElementById('toolVolt'),
   showScale:document.getElementById('showScale'), showL0:document.getElementById('showL0'), showL1:document.getElementById('showL1'), showL2:document.getElementById('showL2'),
   theme:document.getElementById('theme'), reset:document.getElementById('reset'), printBtn:document.getElementById('print'),
+  onlineFiles:document.getElementById('onlineFiles'),
   canvas:document.getElementById('ecg'), overview:document.getElementById('overview'), status:document.getElementById('status'), scroll:document.getElementById('scroll')
 };
 const state = {
@@ -712,4 +713,84 @@ function init(){
   syncScroll();
   setStatus('Ready.');
 }
+
+// ===== DEMO FILES FUNCTIONALITY (Remove this section for production) =====
+const demoFiles = [
+  { name: '0000002.ecg', path: 'ECG files/0000002.ecg', description: 'ECG Sample 2' },
+  { name: '0000003.ecg', path: 'ECG files/0000003.ecg', description: 'ECG Sample 3' }
+];
+
+function showDemoFileMenu() {
+  // Create popup menu
+  const menu = document.createElement('div');
+  menu.className = 'demo-menu';
+  menu.innerHTML = `
+    <div class="demo-menu-content">
+      <h3>Demo ECG Files</h3>
+      ${demoFiles.map(file => `
+        <button class="demo-file-btn" data-path="${file.path}">
+          ${file.description}<br><small>${file.name}</small>
+        </button>
+      `).join('')}
+      <button class="demo-close-btn">Cancel</button>
+    </div>
+  `;
+  
+  // Add styles
+  const style = document.createElement('style');
+  style.textContent = `
+    .demo-menu { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); z-index: 1000; display: flex; align-items: center; justify-content: center; }
+    .demo-menu-content { background: var(--panel); border: 1px solid var(--muted); border-radius: 8px; padding: 20px; min-width: 300px; box-shadow: 0 8px 32px rgba(0,0,0,0.5); }
+    .demo-menu h3 { margin: 0 0 16px 0; color: var(--ink); text-align: center; }
+    .demo-file-btn { display: block; width: 100%; background: var(--bg); color: var(--ink); border: 1px solid var(--muted); padding: 12px; margin: 8px 0; border-radius: 6px; cursor: pointer; text-align: left; transition: all 0.2s; }
+    .demo-file-btn:hover { background: var(--accent); color: white; }
+    .demo-file-btn small { opacity: 0.7; }
+    .demo-close-btn { display: block; width: 100%; background: var(--muted); color: var(--bg); border: 0; padding: 8px; margin-top: 12px; border-radius: 4px; cursor: pointer; }
+  `;
+  document.head.appendChild(style);
+  document.body.appendChild(menu);
+  
+  // Add event listeners
+  menu.addEventListener('click', async (e) => {
+    if (e.target.classList.contains('demo-file-btn')) {
+      const filePath = e.target.dataset.path;
+      await loadDemoFile(filePath);
+      document.body.removeChild(menu);
+      document.head.removeChild(style);
+    } else if (e.target.classList.contains('demo-close-btn') || e.target === menu) {
+      document.body.removeChild(menu);
+      document.head.removeChild(style);
+    }
+  });
+}
+
+async function loadDemoFile(filePath) {
+  try {
+    setStatus('Loading demo file: ' + filePath);
+    const response = await fetch(filePath);
+    if (!response.ok) throw new Error('Failed to load file');
+    
+    const buf = await response.arrayBuffer();
+    parseBinary(buf);
+    
+    state.fs = +els.fs.value || 200;
+    state.uvPerLSB = +els.uv.value || 2;
+    state.viewStart = 0;
+    const totalSec = state.totalSamples / state.fs;
+    state.overview.ovStartSec = 0;
+    state.overview.ovSpanSec = totalSec;
+    
+    setStatus('Demo file loaded: ' + state.leadCount + ' lead(s), ' + state.totalSamples + ' samples/lead. Wheel=zoom, drag=pan. Shift=time caliper, Ctrl=volt caliper.');
+    syncScroll();
+    draw();
+    startOverviewBuild();
+  } catch (err) {
+    console.error(err);
+    setStatus('Error loading demo file: ' + (err && err.message || err), true);
+  }
+}
+
+els.onlineFiles.addEventListener('click', showDemoFileMenu);
+// ===== END DEMO FILES FUNCTIONALITY =====
+
 window.addEventListener('load', init);
