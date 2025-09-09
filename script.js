@@ -17,11 +17,40 @@ const state = {
   raw:null, csv:null, totalSamples:0, viewStart:0,
   dpr:window.devicePixelRatio||1, width:0, height:0,
   tool:'pan', caliper:{a:null,b:null,active:false}, caliperV:{lead:0,yA:null,yB:null,active:false},
-  overview:{pts:[],building:false,progress:0,ovStartSec:0,ovSpanSec:0,range:null}
+  overview:{pts:[],building:false,progress:0,ovStartSec:0,ovSpanSec:0,range:null},
+  // Performance optimization
+  drawPending:false, lastDrawTime:0
 };
 function setStatus(msg,err){ els.status.textContent=msg; els.status.className='status'+(err?' err':''); }
 window.onerror=(m,src,l,c)=>setStatus('JS error: '+m+' @'+l+':'+c,true);
 window.addEventListener('unhandledrejection',e=>setStatus('Promise error: '+(e?.reason?.message||e?.reason||''),true));
+
+// Performance-optimized drawing with debouncing
+function requestDraw() {
+  if(state.drawPending) return;
+  state.drawPending = true;
+  requestAnimationFrame(() => {
+    const now = performance.now();
+    // Throttle to max 60fps for smooth performance
+    if(now - state.lastDrawTime >= 16) {
+      drawImmediate();
+      state.lastDrawTime = now;
+    } else {
+      // If too soon, schedule for later
+      setTimeout(() => {
+        state.drawPending = false;
+        requestDraw();
+      }, 16 - (now - state.lastDrawTime));
+      return;
+    }
+    state.drawPending = false;
+  });
+}
+
+// Main draw function with optimizations
+function draw() {
+  requestDraw();
+}
 
 const clamp=(v,min,max)=>Math.max(min,Math.min(max,v));
 function hasData(){ return (state.raw||state.csv) && state.totalSamples>0; }
@@ -392,12 +421,61 @@ function drawHRRow(ctx, cs, rowIndex, totalRows, rowWinSecs, hrPaneY, hrH, W) {
 function drawPaperGrid(ctx,y0,h,laneH,pxPerSec,gainPx,t0Sec,tSpanSec){
   const t0=t0Sec; const t1=t0Sec+tSpanSec; const smallT=0.04;
   const cs=getComputedStyle(document.body);
-  for(let t=Math.floor(t0/smallT)*smallT;t<=t1+1e-9;t+=smallT){ const x=(t-t0)*pxPerSec; const big=(Math.round(t/smallT)%5===0); ctx.strokeStyle=big? (cs.getPropertyValue('--grid-strong')||'#999') : (cs.getPropertyValue('--grid-weak')||'#999'); ctx.lineWidth=big?1:0.5; ctx.beginPath(); ctx.moveTo(x,y0); ctx.lineTo(x,y0+h); ctx.stroke(); }
+  
+  // Batch vertical lines to reduce draw calls
+  const strongLines = [], weakLines = [];
+  for(let t=Math.floor(t0/smallT)*smallT;t<=t1+1e-9;t+=smallT){ 
+    const x=(t-t0)*pxPerSec; 
+    const big=(Math.round(t/smallT)%5===0);
+    if(big) strongLines.push(x); else weakLines.push(x);
+  }
+  
+  // Draw strong vertical lines
+  if(strongLines.length > 0) {
+    ctx.strokeStyle = cs.getPropertyValue('--grid-strong')||'#999';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    strongLines.forEach(x => { ctx.moveTo(x,y0); ctx.lineTo(x,y0+h); });
+    ctx.stroke();
+  }
+  
+  // Draw weak vertical lines
+  if(weakLines.length > 0) {
+    ctx.strokeStyle = cs.getPropertyValue('--grid-weak')||'#999';
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    weakLines.forEach(x => { ctx.moveTo(x,y0); ctx.lineTo(x,y0+h); });
+    ctx.stroke();
+  }
+  
+  // Batch horizontal lines
   const gridPxPerMV=gainPx; const step=gridPxPerMV*0.1;
-  for(let y=y0,k=0;y<=y0+h+1;y+=step,k++){ const big=(k%5===0); ctx.strokeStyle=big? (cs.getPropertyValue('--grid-strong')||'#999') : (cs.getPropertyValue('--grid-weak')||'#999'); ctx.lineWidth=big?1:0.5; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(state.width,y); ctx.stroke(); }
+  const strongHLines = [], weakHLines = [];
+  for(let y=y0,k=0;y<=y0+h+1;y+=step,k++){ 
+    const big=(k%5===0);
+    if(big) strongHLines.push(y); else weakHLines.push(y);
+  }
+  
+  // Draw strong horizontal lines
+  if(strongHLines.length > 0) {
+    ctx.strokeStyle = cs.getPropertyValue('--grid-strong')||'#999';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    strongHLines.forEach(y => { ctx.moveTo(0,y); ctx.lineTo(state.width,y); });
+    ctx.stroke();
+  }
+  
+  // Draw weak horizontal lines  
+  if(weakHLines.length > 0) {
+    ctx.strokeStyle = cs.getPropertyValue('--grid-weak')||'#999';
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    weakHLines.forEach(y => { ctx.moveTo(0,y); ctx.lineTo(state.width,y); });
+    ctx.stroke();
+  }
 }
 
-function draw(){
+function drawImmediate(){
   const ctx=els.canvas.getContext('2d'); const dpr=state.dpr; ctx.setTransform(dpr,0,0,dpr,0,0);
   const W=els.canvas.clientWidth||800, H=els.canvas.clientHeight||400; state.width=W; state.height=H;
   const cs=getComputedStyle(document.body);
@@ -450,8 +528,25 @@ function draw(){
     for(let k=0;k<shown;k++){
       const baseY = rowY + (k + 0.5) * laneH;
       const seg=segs[r][k]; const gain=gainsPlot[k];
+      
+      // Optimized rendering: skip points when zoomed out, subsample when necessary
+      const segLen = seg.length;
+      const step = segLen > W * 2 ? Math.ceil(segLen / (W * 1.5)) : 1;
+      
       ctx.strokeStyle=cs.getPropertyValue('--trace')||'#a5b4fc'; ctx.lineWidth=1.2; ctx.beginPath();
-      for(let x=0;x<W;x++){ const y=baseY - seg[x]*gain; if(x===0) ctx.moveTo(0,y); else ctx.lineTo(x,y); }
+      
+      let prevX = -1, prevY = -1;
+      for(let i = 0; i < segLen; i += step){
+        const x = Math.round((i / segLen) * W);
+        const y = Math.round(baseY - seg[i] * gain);
+        
+        // Skip if we're drawing to the same pixel position
+        if(x !== prevX || Math.abs(y - prevY) > 1) {
+          if(i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+          prevX = x; prevY = y;
+        }
+      }
       ctx.stroke();
       const x0=20,x1=x0+0.2*pxPerSec; const y0=baseY,y1=y0-1.0*gainPx;
       ctx.strokeStyle=cs.getPropertyValue('--ink')||'#e5e7eb'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(x0,y0); ctx.lineTo(x0,y1); ctx.lineTo(x1,y1); ctx.lineTo(x1,y0); ctx.stroke();
