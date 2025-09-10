@@ -6,6 +6,7 @@ const els = {
   baseline:document.getElementById('baseline'), toolPan:document.getElementById('toolPan'), toolTime:document.getElementById('toolTime'), toolVolt:document.getElementById('toolVolt'),
   showScale:document.getElementById('showScale'), showL0:document.getElementById('showL0'), showL1:document.getElementById('showL1'), showL2:document.getElementById('showL2'),
   theme:document.getElementById('theme'), reset:document.getElementById('reset'), printBtn:document.getElementById('print'),
+  neurokitAnalysis:document.getElementById('neurokitAnalysis'),
   onlineFiles:document.getElementById('onlineFiles'), deviceProps:document.getElementById('deviceProps'), advancedHR:document.getElementById('advancedHR'),
   canvas:document.getElementById('ecg'), overview:document.getElementById('overview'), status:document.getElementById('status'), scroll:document.getElementById('scroll')
 };
@@ -801,6 +802,56 @@ els.robustHR.addEventListener('change', ()=>{ state.robustHR=!!els.robustHR.chec
 els.hrTol.addEventListener('change', ()=>{ state.hrTol=Math.max(5,Math.min(80,(+els.hrTol.value||30))); draw(); drawOverview(); });
 els.showScale.addEventListener('change', ()=>{ state.showScaleBar=!!els.showScale.checked; draw(); });
 els.printBtn.addEventListener('click', ()=>window.print());
+els.neurokitAnalysis.addEventListener('click', ()=>openNeurokitAnalysis());
+
+// Open Neurokit2 Analysis in new window/tab
+function openNeurokitAnalysis() {
+  // Try to start the Python server first, then open the analysis page
+  fetch('http://localhost:5000/health')
+    .then(response => {
+      if (response.ok) {
+        // Server is running, open analysis page
+        window.open('http://localhost:5000/', '_blank');
+      } else {
+        throw new Error('Server not responding');
+      }
+    })
+    .catch(error => {
+      // Server might not be running, show instructions
+      setStatus('Neurokit2 server not running. Please start the server first.', true);
+      showNeurokitInstructions();
+    });
+}
+
+// Show instructions for starting Neurokit2 server
+function showNeurokitInstructions() {
+  const dialog = document.createElement('div');
+  dialog.className = 'settings-dialog';
+  dialog.innerHTML = `
+    <div class="settings-content">
+      <h3>🧠 Neurokit2 ECG Analysis</h3>
+      <p style="margin-bottom: 15px;">To use advanced ECG analysis features, please start the Neurokit2 server:</p>
+      <div style="background: #f0f0f0; padding: 15px; border-radius: 5px; margin: 15px 0; font-family: monospace;">
+        <strong>Step 1:</strong> Open a terminal/command prompt<br>
+        <strong>Step 2:</strong> Navigate to the ECG Explorer directory<br>
+        <strong>Step 3:</strong> Run: <code>python3 neurokit_server.py</code><br>
+        <strong>Step 4:</strong> Wait for "Running on http://0.0.0.0:5000"<br>
+        <strong>Step 5:</strong> Click the 🧠 NK2 button again
+      </div>
+      <p style="color: #666; font-size: 0.9em; margin: 15px 0;">
+        <strong>Note:</strong> The Neurokit2 analysis runs on a separate Python server for advanced ECG processing capabilities including HRV analysis, arrhythmia detection, and machine learning-based signal processing.
+      </p>
+      <div style="text-align: center; margin-top: 20px;">
+        <button onclick="this.parentElement.parentElement.parentElement.remove()" 
+                style="padding: 8px 16px; background: #667eea; color: white; border: none; border-radius: 4px; cursor: pointer;">
+          Got it
+        </button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(dialog);
+}
+
 function init(){
   resize();
   updateWinInput();
